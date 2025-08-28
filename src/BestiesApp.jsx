@@ -267,6 +267,12 @@ const daysData = {
   2083: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
   2084: [31, 31, 32, 31, 31, 30, 30, 30, 29, 30, 30, 30],
   2085: [31, 32, 31, 32, 30, 31, 30, 30, 29, 30, 30, 30],
+  2086: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],
+  2087: [31, 31, 32, 31, 31, 31, 30, 30, 29, 30, 30, 30],
+  2088: [30, 31, 32, 32, 30, 31, 30, 30, 29, 30, 30, 30],
+  2089: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],
+  2090: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],
+
   // Add more years as needed. For years not listed, use default.
 };
 
@@ -685,10 +691,12 @@ const MembersTab = ({ userId }) => {
   const { data: members, loading, error: firestoreError, addDocument, updateDocument, deleteDocument } = useFirestoreData('members', userId);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [joinedDate, setJoinedDate] = useState(new Date().toISOString().split('T')[0]); // Default to today
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
-  const [error, setError] = useState(null); // Added this line
+  const [editJoinedDate, setEditJoinedDate] = useState('');
+  const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'ascending' });
@@ -741,16 +749,21 @@ const MembersTab = ({ userId }) => {
       setError("Phone number should contain only digits.");
       return;
     }
+    if (!joinedDate || !isValidBSDate(joinedDate)) {
+      setError("Please enter a valid date in YYYY-MM-DD format.");
+      return;
+    }
     
     try {
       await addDocument({
         name: name.trim(),
         phone: phone.trim() || "",
-        joinedDate: new Date().toISOString().split('T')[0]
+        joinedDate: joinedDate
       });
       
       setName("");
       setPhone("");
+      setJoinedDate(new Date().toISOString().split('T')[0]); // Reset to today
       setError(null);
       setSuccess("Member added successfully!");
       setTimeout(() => setSuccess(null), 3000);
@@ -763,12 +776,14 @@ const MembersTab = ({ userId }) => {
     setEditingId(member.id);
     setEditName(member.name);
     setEditPhone(member.phone || "");
+    setEditJoinedDate(member.joinedDate || new Date().toISOString().split('T')[0]);
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setEditName("");
     setEditPhone("");
+    setEditJoinedDate("");
   };
 
   const saveEdit = async (id) => {
@@ -780,11 +795,16 @@ const MembersTab = ({ userId }) => {
       setError("Phone number should contain only digits.");
       return;
     }
+    if (!editJoinedDate || !isValidBSDate(editJoinedDate)) {
+      setError("Please enter a valid date in YYYY-MM-DD format.");
+      return;
+    }
     
     try {
       await updateDocument(id, {
         name: editName.trim(),
-        phone: editPhone.trim()
+        phone: editPhone.trim(),
+        joinedDate: editJoinedDate
       });
       
       setEditingId(null);
@@ -851,6 +871,15 @@ const MembersTab = ({ userId }) => {
                 value={phone} 
                 onChange={e => setPhone(e.target.value)} 
                 placeholder="98XXXXXXXX"
+              />
+            </div>
+            <div className="form-group">
+              <label>Join Date *</label>
+              <Input 
+                type="date"
+                value={joinedDate} 
+                onChange={e => setJoinedDate(e.target.value)} 
+                placeholder="YYYY-MM-DD"
               />
             </div>
             <Button onClick={addMember} className="form-btn">
@@ -934,7 +963,17 @@ const MembersTab = ({ userId }) => {
                           </span>
                         )}
                       </td>
-                      <td className="data-value">{member.joinedDate}</td>
+                      <td>
+                        {editingId === member.id ? (
+                          <Input 
+                            type="date"
+                            value={editJoinedDate} 
+                            onChange={e => setEditJoinedDate(e.target.value)}
+                          />
+                        ) : (
+                          <div className="data-value">{member.joinedDate}</div>
+                        )}
+                      </td>
                       <td>
                         {editingId === member.id ? (
                           <div className="action-buttons">
@@ -1015,7 +1054,7 @@ const MembersTab = ({ userId }) => {
 const TransactionsTab = ({ userId }) => {
   const { data: members } = useFirestoreData('members', userId);
   const { data: transactions, addDocument, updateDocument, deleteDocument } = useFirestoreData('transactions', userId);
-  const [settings, setSettings] = useState({ savingsInterestRate: 0.05 });
+  const { data: settingsData } = useFirestoreData('settings', userId);
   const [selectedMember, setSelectedMember] = useState("");
   const [selectedFiscalYear, setSelectedFiscalYear] = useState("2081/2082");
   const [selectedQuarter, setSelectedQuarter] = useState("all");
@@ -1025,6 +1064,13 @@ const TransactionsTab = ({ userId }) => {
   const [success, setSuccess] = useState(null);
   const { generateFiscalYearDates } = useFiscalYearDates();
   const [fiscalYears] = useState(["2081/2082", "2082/2083", "2083/2084", "2084/2085", "2085/2086", "2086/2087", "2087/2088", "2088/2089", "2089/2090", "2090/2091", "2091/2092"]);
+
+  const savingsInterestRate = useMemo(() => {
+    if (settingsData && settingsData.length > 0) {
+      return parseFloat(settingsData[0].savingsInterestRate) / 100;
+    }
+    return 0.05;
+  }, [settingsData]);
 
   const quarters = [
     { value: "all", label: "All Quarters" },
@@ -1038,7 +1084,7 @@ const TransactionsTab = ({ userId }) => {
     if (selectedMember && selectedFiscalYear) {
       calculate();
     }
-  }, [selectedMember, selectedFiscalYear, selectedQuarter, transactions, settings]);
+  }, [selectedMember, selectedFiscalYear, selectedQuarter, transactions, savingsInterestRate]);
 
   const getQuarterLabel = (quarter) => {
     switch(quarter) {
@@ -1063,6 +1109,7 @@ const TransactionsTab = ({ userId }) => {
           ...d,
           saving: 0,
           withdrawal: 0,
+          note: "",
           balance: 0,
           interest: 0,
           totalWithInterest: 0,
@@ -1070,11 +1117,25 @@ const TransactionsTab = ({ userId }) => {
         };
       });
 
-      // Fill in transactions
+      // Fill in transactions and notes
       memberTxs.forEach(tx => {
         if (daily[tx.dateBs]) {
-          if (tx.type === "saving") daily[tx.dateBs].saving += Number(tx.amount);
-          if (tx.type === "withdrawal") daily[tx.dateBs].withdrawal += Number(tx.amount);
+          if (tx.type === "saving") {
+            daily[tx.dateBs].saving += Number(tx.amount);
+            if (tx.note) {
+              daily[tx.dateBs].note = daily[tx.dateBs].note 
+                ? `${daily[tx.dateBs].note}; Saving: ${tx.note}` 
+                : `Saving: ${tx.note}`;
+            }
+          }
+          if (tx.type === "withdrawal") {
+            daily[tx.dateBs].withdrawal += Number(tx.amount);
+            if (tx.note) {
+              daily[tx.dateBs].note = daily[tx.dateBs].note 
+                ? `${daily[tx.dateBs].note}; Withdrawal: ${tx.note}` 
+                : `Withdrawal: ${tx.note}`;
+            }
+          }
         }
       });
 
@@ -1089,11 +1150,9 @@ const TransactionsTab = ({ userId }) => {
         runningBalance += dayData.saving - dayData.withdrawal;
         dayData.balance = runningBalance;
         
-        // Calculate daily interest using dynamic savingsInterestRate
-        const dailyInterest = (runningBalance * settings.savingsInterestRate) / 365;
+        const dailyInterest = (runningBalance * savingsInterestRate) / 365;
         dayData.interest = dailyInterest;
         
-        // Reset quarter interest when quarter changes
         if (d.quarter !== currentQuarter) {
           currentQuarter = d.quarter;
           quarterInterest = 0;
@@ -1121,32 +1180,38 @@ const TransactionsTab = ({ userId }) => {
     }
   };
 
-  const updateTransaction = async (date, type, value) => {
+  const updateTransaction = async (date, type, value, note = "") => {
     if (value && !validateFinancialInput(value)) {
       setError("Please enter a valid amount (positive number up to 100,000,000)");
       return;
     }
     
-    const txs = transactions.filter(tx => tx.memberId === selectedMember && tx.dateBs === date && tx.type === type && tx.fiscalYear === selectedFiscalYear);
+    const txs = transactions.filter(tx => 
+      tx.memberId === selectedMember && 
+      tx.dateBs === date && 
+      tx.type === type && 
+      tx.fiscalYear === selectedFiscalYear
+    );
     
     try {
       if (!value || Number(value) === 0) {
         if (txs.length > 0) {
-          // Delete the transaction
           await deleteDocument(txs[0].id);
         }
       } else {
         if (txs.length > 0) {
-          // Update existing transaction
-          await updateDocument(txs[0].id, { amount: Number(value) });
+          await updateDocument(txs[0].id, { 
+            amount: Number(value),
+            note: note
+          });
         } else {
-          // Create new transaction
           await addDocument({
             memberId: selectedMember,
             fiscalYear: selectedFiscalYear,
             dateBs: date,
             type,
-            amount: Number(value)
+            amount: Number(value),
+            note: note
           });
         }
       }
@@ -1187,7 +1252,8 @@ const TransactionsTab = ({ userId }) => {
       Withdrawal: day.withdrawal,
       Balance: day.balance,
       Interest: day.interest,
-      TotalWithInterest: day.totalWithInterest
+      TotalWithInterest: day.totalWithInterest,
+      Notes: day.note
     }));
     
     exportToCSV(exportData, filename);
@@ -1203,7 +1269,7 @@ const TransactionsTab = ({ userId }) => {
           </Button>
           <div className="header-badge">
             <Calculator />
-            <span>Interest Rate: {(settings.savingsInterestRate * 100).toFixed(2)}%</span>
+            <span>Interest Rate: {(savingsInterestRate * 100).toFixed(2)}%</span>
           </div>
         </div>
       </div>
@@ -1305,65 +1371,101 @@ const TransactionsTab = ({ userId }) => {
                     <th className="text-right">Balance</th>
                     <th className="text-right">Daily Interest</th>
                     <th className="text-right">Total with Interest</th>
+                    <th>Notes</th>
                   </tr>
                 </thead>
                 <tbody>
                   {Object.entries(groupedByQuarter).map(([quarter, days]) => (
                     <React.Fragment key={quarter}>
                       <tr className="quarter-header">
-                        <td colSpan={6}>
+                        <td colSpan={7}>
                           {getQuarterLabel(parseInt(quarter))}
                         </td>
                       </tr>
                       
-                      {days.map((day) => (
-                        <tr key={day.dateBs}>
-                          <td className="date-cell">{day.dateBs}</td>
-                          
-                          <td className="input-cell">
-                            <Input
-                              type="number"
-                              value={day.saving || ''}
-                              onChange={(e) => updateTransaction(day.dateBs, "saving", e.target.value)}
-                              className="text-right"
-                              placeholder="0.00"
-                              min="0"
-                              max="100000000"
-                              step="0.01"
-                            />
-                          </td>
-                          
-                          <td className="input-cell">
-                            <Input
-                              type="number"
-                              value={day.withdrawal || ''}
-                              onChange={(e) => updateTransaction(day.dateBs, "withdrawal", e.target.value)}
-                              className="text-right"
-                              placeholder="0.00"
-                              min="0"
-                              max="100000000"
-                              step="0.01"
-                            />
-                          </td>
-                          
-                          <td className="text-right amount-cell">{currency(day.balance)}</td>
-                          
-                          <td className="text-right interest-cell">{currency(day.interest)}</td>
-                          
-                          <td className="text-right total-cell">{currency(day.totalWithInterest)}</td>
-                        </tr>
-                      ))}
+                      {days.map((day) => {
+                        // Get the existing transactions for this date
+                        const savingTx = transactions.find(tx => 
+                          tx.memberId === selectedMember && 
+                          tx.dateBs === day.dateBs && 
+                          tx.type === "saving" && 
+                          tx.fiscalYear === selectedFiscalYear
+                        );
+                        
+                        const withdrawalTx = transactions.find(tx => 
+                          tx.memberId === selectedMember && 
+                          tx.dateBs === day.dateBs && 
+                          tx.type === "withdrawal" && 
+                          tx.fiscalYear === selectedFiscalYear
+                        );
+                        
+                        // Determine which note to show (prioritize saving note if both exist)
+                        const displayNote = savingTx?.note || withdrawalTx?.note || "";
+                        
+                        return (
+                          <tr key={day.dateBs}>
+                            <td className="date-cell">{day.dateBs}</td>
+                            
+                            <td className="input-cell">
+                              <Input
+                                type="number"
+                                value={day.saving || ''}
+                                onChange={(e) => updateTransaction(day.dateBs, "saving", e.target.value, displayNote)}
+                                className="text-right"
+                                placeholder="0.00"
+                                min="0"
+                                max="100000000"
+                                step="0.01"
+                              />
+                            </td>
+                            
+                            <td className="input-cell">
+                              <Input
+                                type="number"
+                                value={day.withdrawal || ''}
+                                onChange={(e) => updateTransaction(day.dateBs, "withdrawal", e.target.value, displayNote)}
+                                className="text-right"
+                                placeholder="0.00"
+                                min="0"
+                                max="100000000"
+                                step="0.01"
+                              />
+                            </td>
+                            
+                            <td className="text-right amount-cell">{currency(day.balance)}</td>
+                            
+                            <td className="text-right interest-cell">{currency(day.interest)}</td>
+                            
+                            <td className="text-right total-cell">{currency(day.totalWithInterest)}</td>
+                            
+                            <td className="input-cell">
+                              <Input
+                                value={displayNote}
+                                onChange={(e) => {
+                                  // Update note for both saving and withdrawal transactions if they exist
+                                  if (day.saving > 0) {
+                                    updateTransaction(day.dateBs, "saving", day.saving, e.target.value);
+                                  }
+                                  if (day.withdrawal > 0) {
+                                    updateTransaction(day.dateBs, "withdrawal", day.withdrawal, e.target.value);
+                                  }
+                                }}
+                                placeholder="Transaction notes"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </React.Fragment>
                   ))}
                   
                   {/* Totals Row */}
                   <tr className="totals-row">
-                    <td>TOTALS</td>
-                    <td className="text-right savings-total">{currency(totalSavings)}</td>
-                    <td className="text-right withdrawals-total">{currency(totalWithdrawals)}</td>
+                    <td colSpan={3}>TOTALS</td>
                     <td className="text-right balance-total">{currency(finalBalance)}</td>
                     <td className="text-right interest-total">{currency(totalInterest)}</td>
                     <td className="text-right final-total">{currency(finalTotalWithInterest)}</td>
+                    <td></td>
                   </tr>
                 </tbody>
               </table>
@@ -1408,7 +1510,7 @@ const TransactionsTab = ({ userId }) => {
 const LoansTab = ({ userId }) => {
   const { data: members } = useFirestoreData('members', userId);
   const { data: loans, addDocument, updateDocument, deleteDocument } = useFirestoreData('loans', userId);
-  const [settings, setSettings] = useState({ loanInterestRate: 0.05 });
+  const { data: settingsData } = useFirestoreData('settings', userId); // Get settings data
   const [selectedMember, setSelectedMember] = useState("");
   const [selectedFiscalYear, setSelectedFiscalYear] = useState("2081/2082");
   const [selectedQuarter, setSelectedQuarter] = useState("all");
@@ -1418,6 +1520,14 @@ const LoansTab = ({ userId }) => {
   const [success, setSuccess] = useState(null);
   const { generateFiscalYearDates } = useFiscalYearDates();
   const [fiscalYears] = useState(["2081/2082", "2082/2083", "2083/2084", "2084/2085", "2085/2086", "2086/2087", "2087/2088", "2088/2089", "2089/2090", "2090/2091", "2091/2092"]);
+
+  // Get loan interest rate from settings or use default
+  const loanInterestRate = useMemo(() => {
+    if (settingsData && settingsData.length > 0) {
+      return parseFloat(settingsData[0].loanInterestRate) / 100; // Convert from percentage to decimal
+    }
+    return 0.07; // Default 7%
+  }, [settingsData]);
 
   const quarters = [
     { value: "all", label: "All Quarters" },
@@ -1431,7 +1541,7 @@ const LoansTab = ({ userId }) => {
     if (selectedMember && selectedFiscalYear) {
       calculate();
     }
-  }, [selectedMember, selectedFiscalYear, selectedQuarter, loans, settings]);
+  }, [selectedMember, selectedFiscalYear, selectedQuarter, loans, loanInterestRate]);
 
   const getQuarterLabel = (quarter) => {
     switch(quarter) {
@@ -1481,8 +1591,8 @@ const LoansTab = ({ userId }) => {
         runningLoanBalance += dayData.loanTaken - dayData.loanPaid;
         dayData.loanRemaining = runningLoanBalance;
 
-        // Calculate daily interest using dynamic loanInterestRate
-        const dailyInterest = (runningLoanBalance * settings.loanInterestRate) / 365;
+        // Calculate daily interest using the rate from settings
+        const dailyInterest = (runningLoanBalance * loanInterestRate) / 365;
         dayData.interest = dailyInterest;
 
         runningInterestBalance += dailyInterest - dayData.interestPaid;
@@ -1597,7 +1707,7 @@ const LoansTab = ({ userId }) => {
           </Button>
           <div className="header-badge">
             <CreditCard />
-            <span>Interest Rate: {(settings.loanInterestRate * 100).toFixed(2)}%</span>
+            <span>Interest Rate: {(loanInterestRate * 100).toFixed(2)}%</span>
           </div>
         </div>
       </div>
