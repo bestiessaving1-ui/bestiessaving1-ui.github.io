@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import './bestiesapp.css';
-import { auth, db } from './firebase'; // Import auth and db
+import { auth, db } from './firebase';
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import { 
   collection, 
@@ -19,12 +20,10 @@ import {
   getDocs
 } from 'firebase/firestore';
 
-
 // Icons
 const Wallet = () => <div className="icon">💰</div>;
-const Users = () => <div className="icon">👥</div>;
 const FileText = () => <div className="icon">📄</div>;
-const Calculator = () => <div className="icon">🧮</div>;
+const Calculator = () => <div className="icon">🧮</div>; // fixed
 const SettingsIcon = () => <div className="icon">⚙️</div>;
 const LogOut = () => <div className="icon">🚪</div>;
 const Plus = () => <div className="icon">➕</div>;
@@ -193,19 +192,26 @@ const LoadingSpinner = ({ text = "Loading..." }) => (
 );
 
 // Custom hook for Firebase data operations
-const useFirestoreData = (collectionName, userId) => {
+const useFirestoreData = (collectionName, userId, isAdmin) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!userId) return;
+    setLoading(true);
 
     setLoading(true);
-    const q = query(
-      collection(db, collectionName),
-      where("userId", "==", userId)
-    );
+    
+    // For admin, get all data. For regular users, get only their data
+    let q;
+    if (isAdmin) {
+      q = query(collection(db, collectionName));
+    } else {
+      q = query(
+        collection(db, collectionName),
+        where("userId", "==", userId)
+      );
+    }
     
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
@@ -223,13 +229,13 @@ const useFirestoreData = (collectionName, userId) => {
     );
 
     return () => unsubscribe();
-  }, [collectionName, userId]);
+  }, [collectionName, userId, isAdmin]);
 
   const addDocument = async (newData) => {
     try {
       const docRef = await addDoc(collection(db, collectionName), {
         ...newData,
-        userId,
+        userId: isAdmin ? newData.userId || userId : userId,
         createdAt: new Date()
       });
       return docRef.id;
@@ -260,6 +266,39 @@ const useFirestoreData = (collectionName, userId) => {
   return { data, loading, error, addDocument, updateDocument, deleteDocument };
 };
 
+   // Custom hook to check if user is admin
+const useAdminStatus = (userId) => {
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+
+    const checkAdminStatus = async () => {
+      try {
+        const q = query(
+          collection(db, 'admins'),
+          where("uid", "==", userId)
+        );
+        const querySnapshot = await getDocs(q);
+        setIsAdmin(!querySnapshot.empty);
+      } catch (error) {
+        console.error("Error checking admin status:", error);
+        setIsAdmin(false);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAdminStatus();
+  }, [userId]);
+
+  return { isAdmin, loading };
+};
+
 // Days data from Hamro Patro
 const daysData = {
   2081: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 31], // Baisakh to Chaitra
@@ -271,12 +310,76 @@ const daysData = {
   2087: [31, 31, 32, 31, 31, 31, 30, 30, 29, 30, 30, 30],
   2088: [30, 31, 32, 32, 30, 31, 30, 30, 29, 30, 30, 30],
   2089: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],
-  2090: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],
+  2090: [30, 32, 31, 31, 31, 30, 30, 30, 29, 30, 30, 30],
 
   // Add more years as needed. For years not listed, use default.
 };
 
 const defaultDays = [31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 30, 30];
+
+// Reference date: AD 1944-04-14 = BS 2000-01-01
+const AD_REF = new Date('1944-04-14');
+const BS_REF_YEAR = 2000;
+const BS_REF_MONTH = 1; // Baisakh
+const BS_REF_DAY = 1;
+
+const convertADtoBS = (adDateStr) => {
+  const adDate = new Date(adDateStr);
+  if (isNaN(adDate)) return null;
+
+  // Difference in days
+  let diffDays = Math.floor((adDate - AD_REF) / (1000 * 60 * 60 * 24));
+
+  let bsYear = BS_REF_YEAR;
+  let bsMonth = BS_REF_MONTH;
+  let bsDay = BS_REF_DAY;
+
+  while (diffDays > 0) {
+    const daysInMonth = (daysData[bsYear] || defaultDays)[bsMonth - 1] || 30;
+
+    if (diffDays + bsDay <= daysInMonth) {
+      bsDay += diffDays;
+      diffDays = 0;
+    } else {
+      diffDays -= (daysInMonth - bsDay + 1);
+      bsDay = 1;
+      bsMonth++;
+      if (bsMonth > 12) {
+        bsMonth = 1;
+        bsYear++;
+      }
+    }
+  }
+
+  return `${bsYear}-${bsMonth.toString().padStart(2,'0')}-${bsDay.toString().padStart(2,'0')}`;
+};
+
+const convertBStoAD = (bsDateStr) => {
+  const [bsYear, bsMonth, bsDay] = bsDateStr.split('-').map(Number);
+
+  let adDate = new Date(AD_REF);
+  let currentBSYear = BS_REF_YEAR;
+  let currentBSMonth = BS_REF_MONTH;
+  let currentBSDay = BS_REF_DAY;
+
+  while (currentBSYear < bsYear || currentBSMonth < bsMonth || currentBSDay < bsDay) {
+    adDate.setDate(adDate.getDate() + 1);
+    currentBSDay++;
+
+    const daysInMonth = (daysData[currentBSYear] || defaultDays)[currentBSMonth - 1] || 30;
+
+    if (currentBSDay > daysInMonth) {
+      currentBSDay = 1;
+      currentBSMonth++;
+      if (currentBSMonth > 12) {
+        currentBSMonth = 1;
+        currentBSYear++;
+      }
+    }
+  }
+
+  return adDate.toISOString().split('T')[0]; // returns AD in YYYY-MM-DD
+};
 
 // Custom hook for fiscal year dates
 const useFiscalYearDates = () => {
@@ -340,8 +443,8 @@ const useFiscalYearDates = () => {
   return { generateFiscalYearDates };
 };
 
-// LoginPage Component
-const LoginPage = ({ setIsAuthenticated, setUser }) => {
+// LoginPage Component with Password Reset
+const LoginPage = ({ setIsAuthenticated, setUser, setUserRole }) => {
   const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -351,6 +454,8 @@ const LoginPage = ({ setIsAuthenticated, setUser }) => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [showResetForm, setShowResetForm] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
 
   const isValidEmail = (email) => /\S+@\S+\.\S+/.test(email);
 
@@ -368,8 +473,18 @@ const LoginPage = ({ setIsAuthenticated, setUser }) => {
     setLoading(true);
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      
+      // Check if user is admin
+      const q = query(
+        collection(db, 'admins'),
+        where("uid", "==", userCredential.user.uid)
+      );
+      const querySnapshot = await getDocs(q);
+      const isAdmin = !querySnapshot.empty;
+      
       setIsAuthenticated(true);
       setUser(userCredential.user);
+      setUserRole(isAdmin ? 'admin' : 'user');
       setError(null);
     } catch (error) {
       console.error("Login error:", error);
@@ -409,6 +524,7 @@ const LoginPage = ({ setIsAuthenticated, setUser }) => {
         uid: userCredential.user.uid,
         email: userCredential.user.email,
         fullName,
+        role: 'user', // All new registrations are regular users
         createdAt: new Date()
       });
       
@@ -420,6 +536,27 @@ const LoginPage = ({ setIsAuthenticated, setUser }) => {
     } catch (error) {
       console.error("Registration error:", error);
       setError("Registration failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (!resetEmail || !isValidEmail(resetEmail)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, resetEmail);
+      setError(null);
+      setSuccess("Password reset email sent! Check your inbox.");
+      setShowResetForm(false);
+      setResetEmail("");
+    } catch (error) {
+      console.error("Password reset error:", error);
+      setError("Failed to send password reset email. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -437,7 +574,7 @@ const LoginPage = ({ setIsAuthenticated, setUser }) => {
                   <h1>The Besties Saving</h1>
                 </div>
                 <p className="login-subtitle">
-                  {isRegistering ? "Create your account" : "Sign in to your account"}
+                  {showResetForm ? "Reset your password" : isRegistering ? "Create your account" : "Sign in to your account"}
                 </p>
               </div>
 
@@ -448,98 +585,146 @@ const LoginPage = ({ setIsAuthenticated, setUser }) => {
                 </div>
               )}
 
-              <div className="login-form">
-                {isRegistering && (
+              {showResetForm ? (
+                <div className="login-form">
                   <div className="form-group">
-                    <label>Full Name</label>
+                    <label>Email Address</label>
                     <Input
-                      type="text"
-                      value={fullName}
-                      onChange={e => setFullName(e.target.value)}
-                      placeholder="Enter your full name"
-                      icon={<User />}
+                      type="email"
+                      value={resetEmail}
+                      onChange={e => setResetEmail(e.target.value)}
+                      placeholder="Enter your email"
+                      icon={<Mail />}
                     />
                   </div>
-                )}
-                
-                <div className="form-group">
-                  <label>Email Address</label>
-                  <Input
-                    type="email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="Enter your email"
-                    icon={<Mail />}
-                  />
-                </div>
 
-                <div className="form-group">
-                  <label>Password</label>
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="Enter your password"
-                    icon={<Lock />}
-                    suffix={
-                      <button 
-                        type="button" 
-                        className="password-toggle"
-                        onClick={() => setShowPassword(!showPassword)}
+                  <Button
+                    onClick={handlePasswordReset}
+                    className="login-button"
+                    disabled={loading}
+                  >
+                    {loading ? <Loader2 /> : "Send Reset Email"}
+                  </Button>
+
+                  <div className="auth-switch">
+                    <p>
+                      Remember your password?
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowResetForm(false);
+                          setError(null);
+                          setSuccess(null);
+                        }}
                       >
-                        {showPassword ? <EyeOff /> : <Eye />}
+                        Sign In
                       </button>
-                    }
-                  />
+                    </p>
+                  </div>
                 </div>
-
-                {isRegistering && (
+              ) : (
+                <div className="login-form">
+                  {isRegistering && (
+                    <div className="form-group">
+                      <label>Full Name</label>
+                      <Input
+                        type="text"
+                        value={fullName}
+                        onChange={e => setFullName(e.target.value)}
+                        placeholder="Enter your full name"
+                        icon={<User />}
+                      />
+                    </div>
+                  )}
+                  
                   <div className="form-group">
-                    <label>Confirm Password</label>
+                    <label>Email Address</label>
+                    <Input
+                      type="email"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      placeholder="Enter your email"
+                      icon={<Mail />}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Password</label>
                     <Input
                       type={showPassword ? "text" : "password"}
-                      value={confirmPassword}
-                      onChange={e => setConfirmPassword(e.target.value)}
-                      placeholder="Confirm your password"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Enter your password"
                       icon={<Lock />}
+                      suffix={
+                        <button 
+                          type="button" 
+                          className="password-toggle"
+                          onClick={() => setShowPassword(!showPassword)}
+                        >
+                          {showPassword ? <EyeOff /> : <Eye />}
+                        </button>
+                      }
                     />
                   </div>
-                )}
 
-                {!isRegistering && (
-                  <div className="forgot-password">
-                    <a href="#forgot">Forgot your password?</a>
-                  </div>
-                )}
-
-                <Button
-                  onClick={isRegistering ? handleRegister : handleLogin}
-                  className="login-button"
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <Loader2 />
-                  ) : (
-                    isRegistering ? "Create Account" : "Sign In"
+                  {isRegistering && (
+                    <div className="form-group">
+                      <label>Confirm Password</label>
+                      <Input
+                        type={showPassword ? "text" : "password"}
+                        value={confirmPassword}
+                        onChange={e => setConfirmPassword(e.target.value)}
+                        placeholder="Confirm your password"
+                        icon={<Lock />}
+                      />
+                    </div>
                   )}
-                </Button>
 
-                <div className="auth-switch">
-                  <p>
-                    {isRegistering ? "Already have an account?" : "Don't have an account?"}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsRegistering(!isRegistering);
-                        setError(null);
-                        setSuccess(null);
-                      }}
-                    >
-                      {isRegistering ? "Sign In" : "Register"}
-                    </button>
-                  </p>
+                  {!isRegistering && (
+                    <div className="forgot-password">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowResetForm(true);
+                          setError(null);
+                          setSuccess(null);
+                        }}
+                      >
+                        Forgot your password?
+                      </button>
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={isRegistering ? handleRegister : handleLogin}
+                    className="login-button"
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <Loader2 />
+                    ) : (
+                      isRegistering ? "Create Account" : "Sign In"
+                    )}
+                  </Button>
+
+                  <div className="auth-switch">
+                    <p>
+                      {isRegistering ? "Already have an account?" : "Don't have an account?"}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsRegistering(!isRegistering);
+                          setError(null);
+                          setSuccess(null);
+                        }}
+                      >
+                        {isRegistering ? "Sign In" : "Register"}
+                      </button>
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {isRegistering && (
                 <div className="registration-notice">
@@ -559,11 +744,11 @@ const LoginPage = ({ setIsAuthenticated, setUser }) => {
 };
 
 // Dashboard Component
-const Dashboard = ({ userId }) => {
-  const { data: members } = useFirestoreData('members', userId);
-  const { data: loans } = useFirestoreData('loans', userId);
-  const { data: transactions } = useFirestoreData('transactions', userId);
-  const { data: groupTransactions } = useFirestoreData('groupTransactions', userId);
+const Dashboard = ({ userId, isAdmin }) => {
+  const { data: members } = useFirestoreData('members', userId, isAdmin);
+  const { data: loans } = useFirestoreData('loans', userId, isAdmin);
+  const { data: transactions } = useFirestoreData('transactions', userId, isAdmin);
+  const { data: groupTransactions } = useFirestoreData('groupTransactions', userId, isAdmin);
 
   const totalSavings = useMemo(() => {
     return transactions
@@ -596,6 +781,7 @@ const Dashboard = ({ userId }) => {
         <div className="header-badge">
           <BarChart3 />
           <span>Real-time Data</span>
+          {isAdmin && <span className="admin-badge">Admin</span>}
         </div>
       </div>
       
@@ -649,7 +835,7 @@ const Dashboard = ({ userId }) => {
         <Card className="detail-card">
           <CardContent>
             <div className="detail-header">
-              <Users />
+              <User />
               <h3>Recent Members ({members.length})</h3>
             </div>
             <div className="detail-list">
@@ -686,9 +872,9 @@ const Dashboard = ({ userId }) => {
   );
 };
 
-// MembersTab Component
-const MembersTab = ({ userId }) => {
-  const { data: members, loading, error: firestoreError, addDocument, updateDocument, deleteDocument } = useFirestoreData('members', userId);
+// MembersTab Component with BS Date System
+const MembersTab = ({ userId, isAdmin }) => {
+  const { data: members, loading, error: firestoreError, addDocument, updateDocument, deleteDocument } = useFirestoreData('members', userId, isAdmin);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [joinedDate, setJoinedDate] = useState(new Date().toISOString().split('T')[0]); // Default to today
@@ -702,6 +888,24 @@ const MembersTab = ({ userId }) => {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'ascending' });
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
+
+  // Convert AD date to BS date for display
+  const convertToBS = (adDate) => {
+    if (!adDate) return '';
+    const date = new Date(adDate);
+    const year = date.getFullYear() + 57;
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Convert BS date to AD date for storage
+  const convertToAD = (bsDate) => {
+    if (!bsDate) return '';
+    const [year, month, day] = bsDate.split('-').map(Number);
+    const adYear = year - 57;
+    return new Date(adYear, month - 1, day).toISOString().split('T')[0];
+  };
 
   const handleSort = (key) => {
     let direction = 'ascending';
@@ -749,11 +953,12 @@ const MembersTab = ({ userId }) => {
       setError("Phone number should contain only digits.");
       return;
     }
+
     if (!joinedDate || !isValidBSDate(joinedDate)) {
       setError("Please enter a valid date in YYYY-MM-DD format.");
       return;
     }
-    
+
     try {
       await addDocument({
         name: name.trim(),
@@ -763,7 +968,7 @@ const MembersTab = ({ userId }) => {
       
       setName("");
       setPhone("");
-      setJoinedDate(new Date().toISOString().split('T')[0]); // Reset to today
+      setJoinedDate(convertADtoBS(new Date().toISOString().split('T')[0])); // Reset to today in BS
       setError(null);
       setSuccess("Member added successfully!");
       setTimeout(() => setSuccess(null), 3000);
@@ -776,7 +981,7 @@ const MembersTab = ({ userId }) => {
     setEditingId(member.id);
     setEditName(member.name);
     setEditPhone(member.phone || "");
-    setEditJoinedDate(member.joinedDate || new Date().toISOString().split('T')[0]);
+    setEditJoinedDate(convertToBS(member.joinedDate)); // Convert to BS for editing
   };
 
   const cancelEdit = () => {
@@ -795,16 +1000,12 @@ const MembersTab = ({ userId }) => {
       setError("Phone number should contain only digits.");
       return;
     }
-    if (!editJoinedDate || !isValidBSDate(editJoinedDate)) {
-      setError("Please enter a valid date in YYYY-MM-DD format.");
-      return;
-    }
     
     try {
       await updateDocument(id, {
         name: editName.trim(),
         phone: editPhone.trim(),
-        joinedDate: editJoinedDate
+        joinedDate: convertToAD(editJoinedDate) // Convert back to AD for storage
       });
       
       setEditingId(null);
@@ -830,82 +1031,63 @@ const MembersTab = ({ userId }) => {
   };
 
   const handleExport = () => {
-    exportToCSV(members, 'members.csv');
+    // Convert dates to BS for export
+    const membersWithBSDates = members.map(member => ({
+      ...member,
+      joinedDate: convertToBS(member.joinedDate)
+    }));
+    exportToCSV(membersWithBSDates, 'members.csv');
   };
 
   if (loading) return <LoadingSpinner text="Loading members..." />;
 
   return (
     <div className="tab-content">
-      <div className="page-header">
-        <h1>Members Management</h1>
-        <div className="header-actions">
-          <Button onClick={handleExport} variant="outline">
-            <Download /> Export
-          </Button>
-          <div className="header-badge">
-            <Users />
-            <span>{members.length} Members</span>
-          </div>
-        </div>
-      </div>
-
-      <ErrorMessage error={error || firestoreError} />
-      <SuccessMessage success={success} />
-
-      <Card className="form-card">
-        <CardContent>
-          <h2>Add New Member</h2>
-          <div className="form-grid">
-            <div className="form-group">
-              <label>Name *</label>
-              <Input 
-                value={name} 
-                onChange={e => setName(e.target.value)} 
-                placeholder="Member name"
-              />
+      {/* ... (header section) */}
+      
+      {isAdmin && (
+        <Card className="form-card">
+          <CardContent>
+            <h2>Add New Member</h2>
+            <div className="form-grid">
+              <div className="form-group">
+                <label>Name *</label>
+                <Input 
+                  value={name} 
+                  onChange={e => setName(e.target.value)} 
+                  placeholder="Member name"
+                />
+              </div>
+              <div className="form-group">
+                <label>Phone (optional)</label>
+                <Input 
+                  value={phone} 
+                  onChange={e => setPhone(e.target.value)} 
+                  placeholder="98XXXXXXXX"
+                />
+              </div>
+              <div className="form-group">
+                <label>Join Date (BS) *</label>
+                <Input 
+                  type="text"
+                  value={joinedDate} 
+                  onChange={e => setJoinedDate(e.target.value)} 
+                  placeholder="YYYY-MM-DD (BS)"
+                />
+              </div>
+              <Button onClick={addMember} className="form-btn">
+                <Plus /> Add Member
+              </Button>
             </div>
-            <div className="form-group">
-              <label>Phone (optional)</label>
-              <Input 
-                value={phone} 
-                onChange={e => setPhone(e.target.value)} 
-                placeholder="98XXXXXXXX"
-              />
-            </div>
-            <div className="form-group">
-              <label>Join Date *</label>
-              <Input 
-                type="date"
-                value={joinedDate} 
-                onChange={e => setJoinedDate(e.target.value)} 
-                placeholder="YYYY-MM-DD"
-              />
-            </div>
-            <Button onClick={addMember} className="form-btn">
-              <Plus /> Add Member
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="data-card">
         <CardContent>
           <div className="data-header">
             <h2>All Members</h2>
-            <div className="data-actions">
-              <div className="search-box">
-                <Search />
-                <Input
-                  placeholder="Search members..."
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <Button variant="outline" onClick={() => setSearchTerm('')}>
-                <RefreshCw />
-              </Button>
-            </div>
+            {/* ... (search and other controls) */}
           </div>
           
           <div className="table-container">
@@ -924,18 +1106,18 @@ const MembersTab = ({ userId }) => {
                   </th>
                   <th onClick={() => handleSort('joinedDate')}>
                     <div className="table-header">
-                      Join Date <ArrowUpDown />
+                      Join Date (BS) <ArrowUpDown />
                     </div>
                   </th>
-                  <th>Actions</th>
+                  {isAdmin && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
                 {currentMembers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="no-data">
-                      <Users />
-                      <div>No members found. Add your first member above.</div>
+                    <td colSpan={isAdmin ? 4 : 3} className="no-data">
+                      <User />
+                      <div>No members found.</div>
                     </td>
                   </tr>
                 ) : (
@@ -966,51 +1148,54 @@ const MembersTab = ({ userId }) => {
                       <td>
                         {editingId === member.id ? (
                           <Input 
-                            type="date"
+                            type="text"
                             value={editJoinedDate} 
                             onChange={e => setEditJoinedDate(e.target.value)}
+                            placeholder="YYYY-MM-DD (BS)"
                           />
                         ) : (
                           <div className="data-value">{member.joinedDate}</div>
                         )}
                       </td>
-                      <td>
-                        {editingId === member.id ? (
-                          <div className="action-buttons">
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              onClick={() => saveEdit(member.id)}
-                            >
-                              <CheckCircle />
-                            </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              onClick={cancelEdit}
-                            >
-                              ✕
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="action-buttons">
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              onClick={() => startEdit(member)}
-                            >
-                              <Edit />
-                            </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              onClick={() => deleteMember(member.id)}
-                            >
-                              <Trash2 />
-                            </Button>
-                          </div>
-                        )}
-                      </td>
+                      {isAdmin && (
+                        <td>
+                          {editingId === member.id ? (
+                            <div className="action-buttons">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => saveEdit(member.id)}
+                              >
+                                <CheckCircle />
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={cancelEdit}
+                              >
+                                ✕
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="action-buttons">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => startEdit(member)}
+                              >
+                                <Edit />
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => deleteMember(member.id)}
+                              >
+                                <Trash2 />
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}
@@ -1018,37 +1203,13 @@ const MembersTab = ({ userId }) => {
             </table>
           </div>
           
-          {totalPages > 1 && (
-            <div className="pagination">
-              <div className="pagination-info">
-                Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredMembers.length)} of {filteredMembers.length} entries
-              </div>
-              <div className="pagination-controls">
-                <Button
-                  variant="outline"
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft />
-                </Button>
-                <span className="pagination-page">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                >
-                  <ChevronRight />
-                </Button>
-              </div>
-            </div>
-          )}
+          {/* ... (pagination) */}
         </CardContent>
       </Card>
     </div>
   );
 };
+
 
 // TransactionsTab Component
 const TransactionsTab = ({ userId }) => {
@@ -1690,7 +1851,7 @@ const LoansTab = ({ userId }) => {
     return (
       <Card>
         <CardContent className="text-center">
-          <Users />
+          <User />
           <div>No members available. Please add members in the Members tab.</div>
         </CardContent>
       </Card>
@@ -2715,12 +2876,13 @@ const SettingsTab = ({ userId }) => {
 };
 
 // Main App Component
-const App = ({ user, onLogout }) => {
+const App = ({ user, onLogout, userRole }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const isAdmin = userRole === 'admin';
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: <BarChart3 /> },
-    { id: 'members', label: 'Members', icon: <Users /> },
+    { id: 'members', label: 'Members', icon: <User /> },
     { id: 'transactions', label: 'Transactions', icon: <Calculator /> },
     { id: 'loans', label: 'Loans', icon: <CreditCard /> },
     { id: 'groupTransactions', label: 'Group Transactions', icon: <FileText /> },
@@ -2730,19 +2892,19 @@ const App = ({ user, onLogout }) => {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard userId={user.uid} />;
+        return <Dashboard userId={user.uid} isAdmin={isAdmin} />;
       case 'members':
-        return <MembersTab userId={user.uid} />;
+        return <MembersTab userId={user.uid} isAdmin={isAdmin} />;
       case 'transactions':
-        return <TransactionsTab userId={user.uid} />;
+        return <TransactionsTab userId={user.uid} isAdmin={isAdmin} />;
       case 'loans':
-        return <LoansTab userId={user.uid} />;
+        return <LoansTab userId={user.uid} isAdmin={isAdmin} />;
       case 'groupTransactions':
-        return <GroupTransactionsTab userId={user.uid} />;
+        return <GroupTransactionsTab userId={user.uid} isAdmin={isAdmin} />;
       case 'settings':
-        return <SettingsTab userId={user.uid} />;
+        return <SettingsTab userId={user.uid} isAdmin={isAdmin} />;
       default:
-        return <Dashboard userId={user.uid} />;
+        return <Dashboard userId={user.uid} isAdmin={isAdmin} />;
     }
   };
 
@@ -2766,6 +2928,7 @@ const App = ({ user, onLogout }) => {
           <div className="user-info">
             <User />
             {user.email}
+            {isAdmin && <span className="user-role">Admin</span>}
           </div>
         </div>
 
@@ -2800,16 +2963,34 @@ const App = ({ user, onLogout }) => {
 const Root = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
+  const [userRole, setUserRole] = useState('user');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        setIsAuthenticated(true);
-        setUser(user);
+        // Check if user is admin
+        try {
+          const q = query(
+            collection(db, 'admins'),
+            where("uid", "==", user.uid)
+          );
+          const querySnapshot = await getDocs(q);
+          const isAdmin = !querySnapshot.empty;
+          
+          setIsAuthenticated(true);
+          setUser(user);
+          setUserRole(isAdmin ? 'admin' : 'user');
+        } catch (error) {
+          console.error("Error checking admin status:", error);
+          setIsAuthenticated(true);
+          setUser(user);
+          setUserRole('user');
+        }
       } else {
         setIsAuthenticated(false);
         setUser(null);
+        setUserRole('user');
       }
       setLoading(false);
     });
@@ -2820,6 +3001,7 @@ const Root = () => {
   const handleLogout = () => {
     setIsAuthenticated(false);
     setUser(null);
+    setUserRole('user');
   };
 
   if (loading) {
@@ -2827,8 +3009,8 @@ const Root = () => {
   }
 
   return isAuthenticated ? 
-    <App user={user} onLogout={handleLogout} /> : 
-    <LoginPage setIsAuthenticated={setIsAuthenticated} setUser={setUser} />;
+    <App user={user} onLogout={handleLogout} userRole={userRole} /> : 
+    <LoginPage setIsAuthenticated={setIsAuthenticated} setUser={setUser} setUserRole={setUserRole} />;
 };
 
 export default Root;
