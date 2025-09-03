@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import './bestiesapp.css';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { auth, db } from './firebase';
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signOut,
-  onAuthStateChanged,
-  sendPasswordResetEmail
+  onAuthStateChanged
 } from 'firebase/auth';
 import { 
   collection, 
@@ -17,13 +17,15 @@ import {
   onSnapshot,
   query,
   where,
-  getDocs
+  getDocs,
+  serverTimestamp
 } from 'firebase/firestore';
 
-// Icons
+// Icons (same as before)
 const Wallet = () => <div className="icon">💰</div>;
+const Users = () => <div className="icon">👥</div>;
 const FileText = () => <div className="icon">📄</div>;
-const Calculator = () => <div className="icon">🧮</div>; // fixed
+const Calculator = () => <div className="icon">🧮</div>;
 const SettingsIcon = () => <div className="icon">⚙️</div>;
 const LogOut = () => <div className="icon">🚪</div>;
 const Plus = () => <div className="icon">➕</div>;
@@ -61,7 +63,7 @@ const InfoIcon = () => (
   </svg>
 );
 
-// Utility Functions
+// Utility Functions (same as before)
 const isValidBSDate = (dateString) => {
   if (!dateString) return false;
   const regex = /^\d{4}-\d{2}-\d{2}$/;
@@ -106,7 +108,7 @@ const exportToCSV = (data, filename) => {
 const currency = (n) =>
   `Rs. ${Number(n||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 
-// Reusable Components
+// Reusable Components (same as before)
 const Card = ({ children, className, ...props }) => (
   <div className={`card ${className}`} {...props}>{children}</div>
 );
@@ -191,27 +193,19 @@ const LoadingSpinner = ({ text = "Loading..." }) => (
   </div>
 );
 
-// Custom hook for Firebase data operations
-const useFirestoreData = (collectionName, userId, isAdmin) => {
+// Custom hook for Firebase data operations - UPDATED FOR SHARED DATA
+const useFirestoreData = (collectionName, userId, isAdmin = false) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     setLoading(true);
-
-    setLoading(true);
     
-    // For admin, get all data. For regular users, get only their data
-    let q;
-    if (isAdmin) {
-      q = query(collection(db, collectionName));
-    } else {
-      q = query(
-        collection(db, collectionName),
-        where("userId", "==", userId)
-      );
-    }
+    // For shared data, we don't filter by userId
+    const q = isAdmin 
+      ? query(collection(db, collectionName)) // Admins see all data
+      : query(collection(db, collectionName)); // All users see the same data
     
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
@@ -235,8 +229,7 @@ const useFirestoreData = (collectionName, userId, isAdmin) => {
     try {
       const docRef = await addDoc(collection(db, collectionName), {
         ...newData,
-        userId: isAdmin ? newData.userId || userId : userId,
-        createdAt: new Date()
+        createdAt: serverTimestamp()
       });
       return docRef.id;
     } catch (err) {
@@ -266,42 +259,9 @@ const useFirestoreData = (collectionName, userId, isAdmin) => {
   return { data, loading, error, addDocument, updateDocument, deleteDocument };
 };
 
-   // Custom hook to check if user is admin
-const useAdminStatus = (userId) => {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!userId) {
-      setLoading(false);
-      return;
-    }
-
-    const checkAdminStatus = async () => {
-      try {
-        const q = query(
-          collection(db, 'admins'),
-          where("uid", "==", userId)
-        );
-        const querySnapshot = await getDocs(q);
-        setIsAdmin(!querySnapshot.empty);
-      } catch (error) {
-        console.error("Error checking admin status:", error);
-        setIsAdmin(false);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    checkAdminStatus();
-  }, [userId]);
-
-  return { isAdmin, loading };
-};
-
-// Days data from Hamro Patro
+// Days data from Hamro Patro (same as before)
 const daysData = {
-  2081: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 31], // Baisakh to Chaitra
+  2081: [31, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 31],
   2082: [31, 31, 32, 31, 31, 31, 30, 30, 30, 29, 30, 30],
   2083: [31, 31, 32, 31, 31, 31, 30, 29, 30, 29, 30, 30],
   2084: [31, 31, 32, 31, 31, 30, 30, 30, 29, 30, 30, 30],
@@ -310,83 +270,16 @@ const daysData = {
   2087: [31, 31, 32, 31, 31, 31, 30, 30, 29, 30, 30, 30],
   2088: [30, 31, 32, 32, 30, 31, 30, 30, 29, 30, 30, 30],
   2089: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],
-  2090: [30, 32, 31, 31, 31, 30, 30, 30, 29, 30, 30, 30],
-
-  // Add more years as needed. For years not listed, use default.
+  2090: [30, 32, 31, 32, 31, 30, 30, 30, 29, 30, 30, 30],
 };
 
 const defaultDays = [31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 30, 30];
 
-// Reference date: AD 1944-04-14 = BS 2000-01-01
-const AD_REF = new Date('1944-04-14');
-const BS_REF_YEAR = 2000;
-const BS_REF_MONTH = 1; // Baisakh
-const BS_REF_DAY = 1;
-
-const convertADtoBS = (adDateStr) => {
-  const adDate = new Date(adDateStr);
-  if (isNaN(adDate)) return null;
-
-  // Difference in days
-  let diffDays = Math.floor((adDate - AD_REF) / (1000 * 60 * 60 * 24));
-
-  let bsYear = BS_REF_YEAR;
-  let bsMonth = BS_REF_MONTH;
-  let bsDay = BS_REF_DAY;
-
-  while (diffDays > 0) {
-    const daysInMonth = (daysData[bsYear] || defaultDays)[bsMonth - 1] || 30;
-
-    if (diffDays + bsDay <= daysInMonth) {
-      bsDay += diffDays;
-      diffDays = 0;
-    } else {
-      diffDays -= (daysInMonth - bsDay + 1);
-      bsDay = 1;
-      bsMonth++;
-      if (bsMonth > 12) {
-        bsMonth = 1;
-        bsYear++;
-      }
-    }
-  }
-
-  return `${bsYear}-${bsMonth.toString().padStart(2,'0')}-${bsDay.toString().padStart(2,'0')}`;
-};
-
-const convertBStoAD = (bsDateStr) => {
-  const [bsYear, bsMonth, bsDay] = bsDateStr.split('-').map(Number);
-
-  let adDate = new Date(AD_REF);
-  let currentBSYear = BS_REF_YEAR;
-  let currentBSMonth = BS_REF_MONTH;
-  let currentBSDay = BS_REF_DAY;
-
-  while (currentBSYear < bsYear || currentBSMonth < bsMonth || currentBSDay < bsDay) {
-    adDate.setDate(adDate.getDate() + 1);
-    currentBSDay++;
-
-    const daysInMonth = (daysData[currentBSYear] || defaultDays)[currentBSMonth - 1] || 30;
-
-    if (currentBSDay > daysInMonth) {
-      currentBSDay = 1;
-      currentBSMonth++;
-      if (currentBSMonth > 12) {
-        currentBSMonth = 1;
-        currentBSYear++;
-      }
-    }
-  }
-
-  return adDate.toISOString().split('T')[0]; // returns AD in YYYY-MM-DD
-};
-
-// Custom hook for fiscal year dates
+// Custom hook for fiscal year dates (same as before)
 const useFiscalYearDates = () => {
   const generateFiscalYearDates = async (fiscalYear) => {
     const [startYear, endYear] = fiscalYear.split('/').map(Number);
     
-    // Months in order: Magh, Falgun, Chaitra (startYear), Baisakh to Poush (endYear)
     const months = [
       { name: 'Magh', standardMonth: 10 },
       { name: 'Falgun', standardMonth: 11 },
@@ -414,7 +307,6 @@ const useFiscalYearDates = () => {
 
       const monthNum = month.standardMonth;
       
-      // Handle year transition (after Chaitra)
       if (i > 2) {
         currentYear = endYear;
       }
@@ -443,7 +335,7 @@ const useFiscalYearDates = () => {
   return { generateFiscalYearDates };
 };
 
-// LoginPage Component with Password Reset
+// LoginPage Component 
 const LoginPage = ({ setIsAuthenticated, setUser, setUserRole }) => {
   const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState("");
@@ -454,10 +346,22 @@ const LoginPage = ({ setIsAuthenticated, setUser, setUserRole }) => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [showResetForm, setShowResetForm] = useState(false);
-  const [resetEmail, setResetEmail] = useState("");
+  const [isAdminRegistration, setIsAdminRegistration] = useState(false);
+
+  const navigate = useNavigate();
 
   const isValidEmail = (email) => /\S+@\S+\.\S+/.test(email);
+
+  // Check if user is admin by looking up in Firebase admins collection
+  const checkIfUserIsAdmin = async (userId) => {
+    try {
+      const adminDoc = await getDocs(query(collection(db, "admins"), where("userId", "==", userId)));
+      return !adminDoc.empty;
+    } catch (error) {
+      console.error("Error checking admin status:", error);
+      return false;
+    }
+  };
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -475,17 +379,14 @@ const LoginPage = ({ setIsAuthenticated, setUser, setUserRole }) => {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       
       // Check if user is admin
-      const q = query(
-        collection(db, 'admins'),
-        where("uid", "==", userCredential.user.uid)
-      );
-      const querySnapshot = await getDocs(q);
-      const isAdmin = !querySnapshot.empty;
+      const isAdmin = await checkIfUserIsAdmin(userCredential.user.uid);
       
       setIsAuthenticated(true);
       setUser(userCredential.user);
-      setUserRole(isAdmin ? 'admin' : 'user');
+      setUserRole(isAdmin ? "admin" : "user");
       setError(null);
+
+      navigate("/dashboard", { replace: true });
     } catch (error) {
       console.error("Login error:", error);
       setError("Invalid email or password. Please try again.");
@@ -520,43 +421,39 @@ const LoginPage = ({ setIsAuthenticated, setUser, setUserRole }) => {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       
       // Store additional user data in Firestore
-      await addDoc(collection(db, 'users'), {
+      await addDoc(collection(db, "users"), {
         uid: userCredential.user.uid,
         email: userCredential.user.email,
         fullName,
-        role: 'user', // All new registrations are regular users
-        createdAt: new Date()
+        createdAt: serverTimestamp(),
       });
       
+      // If admin registration, add to admins collection
+      if (isAdminRegistration) {
+        await addDoc(collection(db, "admins"), {
+          userId: userCredential.user.uid,
+          email: userCredential.user.email,
+          fullName,
+          createdAt: serverTimestamp(),
+        });
+      }
+      
       setError(null);
-      setSuccess("Registration successful! You can now login.");
+      setSuccess("Registration successful! Redirecting...");
+
+      setIsAuthenticated(true);
+      setUser(userCredential.user);
+      setUserRole(isAdminRegistration ? "admin" : "user");
+
+      navigate("/dashboard", { replace: true });
+
       setIsRegistering(false);
       setPassword("");
       setConfirmPassword("");
+      setIsAdminRegistration(false);
     } catch (error) {
       console.error("Registration error:", error);
       setError("Registration failed. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePasswordReset = async () => {
-    if (!resetEmail || !isValidEmail(resetEmail)) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await sendPasswordResetEmail(auth, resetEmail);
-      setError(null);
-      setSuccess("Password reset email sent! Check your inbox.");
-      setShowResetForm(false);
-      setResetEmail("");
-    } catch (error) {
-      console.error("Password reset error:", error);
-      setError("Failed to send password reset email. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -574,165 +471,144 @@ const LoginPage = ({ setIsAuthenticated, setUser, setUserRole }) => {
                   <h1>The Besties Saving</h1>
                 </div>
                 <p className="login-subtitle">
-                  {showResetForm ? "Reset your password" : isRegistering ? "Create your account" : "Sign in to your account"}
+                  {isRegistering ? "Create your account" : "Sign in to your account"}
                 </p>
               </div>
 
               {(error || success) && (
-                <div className={`message-container ${error ? 'error' : 'success'}`}>
+                <div className={`message-container ${error ? "error" : "success"}`}>
                   {error ? <AlertCircle /> : <CheckCircle />}
                   <span>{error || success}</span>
                 </div>
               )}
 
-              {showResetForm ? (
-                <div className="login-form">
+              <div className="login-form">
+                {isRegistering && (
                   <div className="form-group">
-                    <label>Email Address</label>
+                    <label>Full Name</label>
                     <Input
-                      type="email"
-                      value={resetEmail}
-                      onChange={e => setResetEmail(e.target.value)}
-                      placeholder="Enter your email"
-                      icon={<Mail />}
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="Enter your full name"
+                      icon={<User />}
                     />
                   </div>
-
-                  <Button
-                    onClick={handlePasswordReset}
-                    className="login-button"
-                    disabled={loading}
-                  >
-                    {loading ? <Loader2 /> : "Send Reset Email"}
-                  </Button>
-
-                  <div className="auth-switch">
-                    <p>
-                      Remember your password?
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowResetForm(false);
-                          setError(null);
-                          setSuccess(null);
-                        }}
-                      >
-                        Sign In
-                      </button>
-                    </p>
-                  </div>
+                )}
+                
+                <div className="form-group">
+                  <label>Email Address</label>
+                  <Input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Enter your email"
+                    icon={<Mail />}
+                  />
                 </div>
-              ) : (
-                <div className="login-form">
-                  {isRegistering && (
-                    <div className="form-group">
-                      <label>Full Name</label>
-                      <Input
-                        type="text"
-                        value={fullName}
-                        onChange={e => setFullName(e.target.value)}
-                        placeholder="Enter your full name"
-                        icon={<User />}
-                      />
-                    </div>
-                  )}
-                  
-                  <div className="form-group">
-                    <label>Email Address</label>
-                    <Input
-                      type="email"
-                      value={email}
-                      onChange={e => setEmail(e.target.value)}
-                      placeholder="Enter your email"
-                      icon={<Mail />}
-                    />
-                  </div>
 
+                <div className="form-group">
+                  <label>Password</label>
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    icon={<Lock />}
+                    suffix={
+                      <button 
+                        type="button" 
+                        className="password-toggle"
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? <EyeOff /> : <Eye />}
+                      </button>
+                    }
+                  />
+                </div>
+
+                {isRegistering && (
                   <div className="form-group">
-                    <label>Password</label>
+                    <label>Confirm Password</label>
                     <Input
                       type={showPassword ? "text" : "password"}
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      placeholder="Enter your password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm your password"
                       icon={<Lock />}
-                      suffix={
-                        <button 
-                          type="button" 
-                          className="password-toggle"
-                          onClick={() => setShowPassword(!showPassword)}
-                        >
-                          {showPassword ? <EyeOff /> : <Eye />}
-                        </button>
-                      }
                     />
                   </div>
+                )}
 
-                  {isRegistering && (
-                    <div className="form-group">
-                      <label>Confirm Password</label>
-                      <Input
-                        type={showPassword ? "text" : "password"}
-                        value={confirmPassword}
-                        onChange={e => setConfirmPassword(e.target.value)}
-                        placeholder="Confirm your password"
-                        icon={<Lock />}
-                      />
-                    </div>
-                  )}
-
-                  {!isRegistering && (
-                    <div className="forgot-password">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowResetForm(true);
-                          setError(null);
-                          setSuccess(null);
-                        }}
-                      >
-                        Forgot your password?
-                      </button>
-                    </div>
-                  )}
-
-                  <Button
-                    onClick={isRegistering ? handleRegister : handleLogin}
-                    className="login-button"
-                    disabled={loading}
-                  >
-                    {loading ? (
-                      <Loader2 />
-                    ) : (
-                      isRegistering ? "Create Account" : "Sign In"
-                    )}
-                  </Button>
-
-                  <div className="auth-switch">
-                    <p>
-                      {isRegistering ? "Already have an account?" : "Don't have an account?"}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsRegistering(!isRegistering);
-                          setError(null);
-                          setSuccess(null);
-                        }}
-                      >
-                        {isRegistering ? "Sign In" : "Register"}
-                      </button>
-                    </p>
+                {!isRegistering && (
+                  <div className="forgot-password">
+                    <a href="#forgot">Forgot your password?</a>
                   </div>
-                </div>
-              )}
+                )}
 
-              {isRegistering && (
+                <Button
+                  onClick={isRegistering ? handleRegister : handleLogin}
+                  className="login-button"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <Loader2 />
+                  ) : (
+                    isRegistering ? "Create Account" : "Sign In"
+                  )}
+                </Button>
+
+                <div className="auth-switch">
+                  <p>
+                    {isRegistering ? "Already have an account?" : "Don't have an account?"}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsRegistering(!isRegistering);
+                        setError(null);
+                        setSuccess(null);
+                        setIsAdminRegistration(false);
+                      }}
+                    >
+                      {isRegistering ? "Sign In" : "Register"}
+                    </button>
+                  </p>
+                </div>
+
+                {!isRegistering && (
+                  <div className="admin-register-link">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsRegistering(true);
+                        setIsAdminRegistration(true);
+                        setError(null);
+                        setSuccess(null);
+                      }}
+                    >
+                      Register as Admin
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {isRegistering && !isAdminRegistration && (
                 <div className="registration-notice">
                   <div className="notice-header">
                     <InfoIcon />
                     <span>View-Only Access</span>
                   </div>
                   <p>New accounts have view-only access. Contact an administrator for full access privileges.</p>
+                </div>
+              )}
+
+              {isRegistering && isAdminRegistration && (
+                <div className="registration-notice admin">
+                  <div className="notice-header">
+                    <InfoIcon />
+                    <span>Administrator Registration</span>
+                  </div>
+                  <p>You are registering as an administrator. This account will have full access to modify all data.</p>
                 </div>
               )}
             </CardContent>
@@ -743,8 +619,8 @@ const LoginPage = ({ setIsAuthenticated, setUser, setUserRole }) => {
   );
 };
 
-// Dashboard Component
-const Dashboard = ({ userId, isAdmin }) => {
+// Dashboard Component 
+const Dashboard = ({ userId, isAdmin, userName }) => {
   const { data: members } = useFirestoreData('members', userId, isAdmin);
   const { data: loans } = useFirestoreData('loans', userId, isAdmin);
   const { data: transactions } = useFirestoreData('transactions', userId, isAdmin);
@@ -777,7 +653,10 @@ const Dashboard = ({ userId, isAdmin }) => {
   return (
     <div className="dashboard">
       <div className="page-header">
-        <h1>Dashboard Overview</h1>
+        <div>
+          <h1>Welcome back, {userName || "User"}!</h1>
+          <p>Here's your financial overview</p>
+        </div>
         <div className="header-badge">
           <BarChart3 />
           <span>Real-time Data</span>
@@ -835,7 +714,7 @@ const Dashboard = ({ userId, isAdmin }) => {
         <Card className="detail-card">
           <CardContent>
             <div className="detail-header">
-              <User />
+              <Users />
               <h3>Recent Members ({members.length})</h3>
             </div>
             <div className="detail-list">
@@ -872,12 +751,12 @@ const Dashboard = ({ userId, isAdmin }) => {
   );
 };
 
-// MembersTab Component with BS Date System
+// MembersTab Component 
 const MembersTab = ({ userId, isAdmin }) => {
   const { data: members, loading, error: firestoreError, addDocument, updateDocument, deleteDocument } = useFirestoreData('members', userId, isAdmin);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [joinedDate, setJoinedDate] = useState(new Date().toISOString().split('T')[0]); // Default to today
+  const [joinedDate, setJoinedDate] = useState(new Date().toISOString().split('T')[0]);
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
@@ -888,24 +767,6 @@ const MembersTab = ({ userId, isAdmin }) => {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'ascending' });
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
-
-  // Convert AD date to BS date for display
-  const convertToBS = (adDate) => {
-    if (!adDate) return '';
-    const date = new Date(adDate);
-    const year = date.getFullYear() + 57;
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  // Convert BS date to AD date for storage
-  const convertToAD = (bsDate) => {
-    if (!bsDate) return '';
-    const [year, month, day] = bsDate.split('-').map(Number);
-    const adYear = year - 57;
-    return new Date(adYear, month - 1, day).toISOString().split('T')[0];
-  };
 
   const handleSort = (key) => {
     let direction = 'ascending';
@@ -945,6 +806,11 @@ const MembersTab = ({ userId, isAdmin }) => {
   }, [filteredMembers, currentPage, itemsPerPage]);
 
   const addMember = async () => {
+    if (!isAdmin) {
+      setError("Only administrators can add members.");
+      return;
+    }
+    
     if (!name.trim()) {
       setError("Name is required.");
       return;
@@ -953,12 +819,11 @@ const MembersTab = ({ userId, isAdmin }) => {
       setError("Phone number should contain only digits.");
       return;
     }
-
     if (!joinedDate || !isValidBSDate(joinedDate)) {
       setError("Please enter a valid date in YYYY-MM-DD format.");
       return;
     }
-
+    
     try {
       await addDocument({
         name: name.trim(),
@@ -968,7 +833,7 @@ const MembersTab = ({ userId, isAdmin }) => {
       
       setName("");
       setPhone("");
-      setJoinedDate(convertADtoBS(new Date().toISOString().split('T')[0])); // Reset to today in BS
+      setJoinedDate(new Date().toISOString().split('T')[0]);
       setError(null);
       setSuccess("Member added successfully!");
       setTimeout(() => setSuccess(null), 3000);
@@ -978,10 +843,14 @@ const MembersTab = ({ userId, isAdmin }) => {
   };
 
   const startEdit = (member) => {
+    if (!isAdmin) {
+      setError("Only administrators can edit members.");
+      return;
+    }
     setEditingId(member.id);
     setEditName(member.name);
     setEditPhone(member.phone || "");
-    setEditJoinedDate(convertToBS(member.joinedDate)); // Convert to BS for editing
+    setEditJoinedDate(member.joinedDate || new Date().toISOString().split('T')[0]);
   };
 
   const cancelEdit = () => {
@@ -992,6 +861,11 @@ const MembersTab = ({ userId, isAdmin }) => {
   };
 
   const saveEdit = async (id) => {
+    if (!isAdmin) {
+      setError("Only administrators can edit members.");
+      return;
+    }
+    
     if (!editName.trim()) {
       setError("Name is required.");
       return;
@@ -1000,12 +874,16 @@ const MembersTab = ({ userId, isAdmin }) => {
       setError("Phone number should contain only digits.");
       return;
     }
+    if (!editJoinedDate || !isValidBSDate(editJoinedDate)) {
+      setError("Please enter a valid date in YYYY-MM-DD format.");
+      return;
+    }
     
     try {
       await updateDocument(id, {
         name: editName.trim(),
         phone: editPhone.trim(),
-        joinedDate: convertToAD(editJoinedDate) // Convert back to AD for storage
+        joinedDate: editJoinedDate
       });
       
       setEditingId(null);
@@ -1018,6 +896,11 @@ const MembersTab = ({ userId, isAdmin }) => {
   };
 
   const deleteMember = async (id) => {
+    if (!isAdmin) {
+      setError("Only administrators can delete members.");
+      return;
+    }
+    
     if (!window.confirm("Are you sure you want to delete this member?")) return;
     
     try {
@@ -1031,20 +914,30 @@ const MembersTab = ({ userId, isAdmin }) => {
   };
 
   const handleExport = () => {
-    // Convert dates to BS for export
-    const membersWithBSDates = members.map(member => ({
-      ...member,
-      joinedDate: convertToBS(member.joinedDate)
-    }));
-    exportToCSV(membersWithBSDates, 'members.csv');
+    exportToCSV(members, 'members.csv');
   };
 
   if (loading) return <LoadingSpinner text="Loading members..." />;
 
   return (
     <div className="tab-content">
-      {/* ... (header section) */}
-      
+      <div className="page-header">
+        <h1>Members Management</h1>
+        <div className="header-actions">
+          <Button onClick={handleExport} variant="outline">
+            <Download /> Export
+          </Button>
+          <div className="header-badge">
+            <Users />
+            <span>{members.length} Members</span>
+            {isAdmin && <span className="admin-badge">Admin</span>}
+          </div>
+        </div>
+      </div>
+
+      <ErrorMessage error={error || firestoreError} />
+      <SuccessMessage success={success} />
+
       {isAdmin && (
         <Card className="form-card">
           <CardContent>
@@ -1067,12 +960,12 @@ const MembersTab = ({ userId, isAdmin }) => {
                 />
               </div>
               <div className="form-group">
-                <label>Join Date (BS) *</label>
+                <label>Join Date *</label>
                 <Input 
-                  type="text"
+                  type="date"
                   value={joinedDate} 
                   onChange={e => setJoinedDate(e.target.value)} 
-                  placeholder="YYYY-MM-DD (BS)"
+                  placeholder="YYYY-MM-DD"
                 />
               </div>
               <Button onClick={addMember} className="form-btn">
@@ -1087,7 +980,19 @@ const MembersTab = ({ userId, isAdmin }) => {
         <CardContent>
           <div className="data-header">
             <h2>All Members</h2>
-            {/* ... (search and other controls) */}
+            <div className="data-actions">
+              <div className="search-box">
+                <Search />
+                <Input
+                  placeholder="Search members..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <Button variant="outline" onClick={() => setSearchTerm('')}>
+                <RefreshCw />
+              </Button>
+            </div>
           </div>
           
           <div className="table-container">
@@ -1106,7 +1011,7 @@ const MembersTab = ({ userId, isAdmin }) => {
                   </th>
                   <th onClick={() => handleSort('joinedDate')}>
                     <div className="table-header">
-                      Join Date (BS) <ArrowUpDown />
+                      Join Date <ArrowUpDown />
                     </div>
                   </th>
                   {isAdmin && <th>Actions</th>}
@@ -1116,7 +1021,7 @@ const MembersTab = ({ userId, isAdmin }) => {
                 {currentMembers.length === 0 ? (
                   <tr>
                     <td colSpan={isAdmin ? 4 : 3} className="no-data">
-                      <User />
+                      <Users />
                       <div>No members found.</div>
                     </td>
                   </tr>
@@ -1148,10 +1053,9 @@ const MembersTab = ({ userId, isAdmin }) => {
                       <td>
                         {editingId === member.id ? (
                           <Input 
-                            type="text"
+                            type="date"
                             value={editJoinedDate} 
                             onChange={e => setEditJoinedDate(e.target.value)}
-                            placeholder="YYYY-MM-DD (BS)"
                           />
                         ) : (
                           <div className="data-value">{member.joinedDate}</div>
@@ -1183,14 +1087,14 @@ const MembersTab = ({ userId, isAdmin }) => {
                                 size="sm" 
                                 onClick={() => startEdit(member)}
                               >
-                                <Edit />
+                                <Edit /> Edit
                               </Button>
                               <Button 
                                 variant="outline" 
                                 size="sm" 
                                 onClick={() => deleteMember(member.id)}
                               >
-                                <Trash2 />
+                                <Trash2 /> Delete
                               </Button>
                             </div>
                           )}
@@ -1203,19 +1107,43 @@ const MembersTab = ({ userId, isAdmin }) => {
             </table>
           </div>
           
-          {/* ... (pagination) */}
+          {totalPages > 1 && (
+            <div className="pagination">
+              <div className="pagination-info">
+                Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredMembers.length)} of {filteredMembers.length} entries
+              </div>
+              <div className="pagination-controls">
+                <Button
+                  variant="outline"
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft />
+                </Button>
+                <span className="pagination-page">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                >
+                  <ChevronRight />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
   );
 };
 
-
 // TransactionsTab Component
-const TransactionsTab = ({ userId }) => {
-  const { data: members } = useFirestoreData('members', userId);
-  const { data: transactions, addDocument, updateDocument, deleteDocument } = useFirestoreData('transactions', userId);
-  const { data: settingsData } = useFirestoreData('settings', userId);
+const TransactionsTab = ({ userId, isAdmin }) => {
+  const { data: members } = useFirestoreData('members', userId, isAdmin);
+  const { data: transactions, addDocument, updateDocument, deleteDocument } = useFirestoreData('transactions', userId, isAdmin);
+  const { data: settingsData } = useFirestoreData('settings', userId, isAdmin);
   const [selectedMember, setSelectedMember] = useState("");
   const [selectedFiscalYear, setSelectedFiscalYear] = useState("2081/2082");
   const [selectedQuarter, setSelectedQuarter] = useState("all");
@@ -1311,7 +1239,7 @@ const TransactionsTab = ({ userId }) => {
         runningBalance += dayData.saving - dayData.withdrawal;
         dayData.balance = runningBalance;
         
-        const dailyInterest = (runningBalance * savingsInterestRate) / 365;
+        const dailyInterest = (runningBalance * savingsInterestRate) / fyDates.length;
         dayData.interest = dailyInterest;
         
         if (d.quarter !== currentQuarter) {
@@ -1342,6 +1270,11 @@ const TransactionsTab = ({ userId }) => {
   };
 
   const updateTransaction = async (date, type, value, note = "") => {
+    if (!isAdmin) {
+      setError("Only administrators can modify transactions.");
+      return;
+    }
+    
     if (value && !validateFinancialInput(value)) {
       setError("Please enter a valid amount (positive number up to 100,000,000)");
       return;
@@ -1431,6 +1364,7 @@ const TransactionsTab = ({ userId }) => {
           <div className="header-badge">
             <Calculator />
             <span>Interest Rate: {(savingsInterestRate * 100).toFixed(2)}%</span>
+            {isAdmin && <span className="admin-badge">Admin</span>}
           </div>
         </div>
       </div>
@@ -1577,6 +1511,7 @@ const TransactionsTab = ({ userId }) => {
                                 min="0"
                                 max="100000000"
                                 step="0.01"
+                                disabled={!isAdmin}
                               />
                             </td>
                             
@@ -1590,6 +1525,7 @@ const TransactionsTab = ({ userId }) => {
                                 min="0"
                                 max="100000000"
                                 step="0.01"
+                                disabled={!isAdmin}
                               />
                             </td>
                             
@@ -1612,6 +1548,7 @@ const TransactionsTab = ({ userId }) => {
                                   }
                                 }}
                                 placeholder="Transaction notes"
+                                disabled={!isAdmin}
                               />
                             </td>
                           </tr>
@@ -1668,10 +1605,10 @@ const TransactionsTab = ({ userId }) => {
 };
 
 // LoansTab Component
-const LoansTab = ({ userId }) => {
-  const { data: members } = useFirestoreData('members', userId);
-  const { data: loans, addDocument, updateDocument, deleteDocument } = useFirestoreData('loans', userId);
-  const { data: settingsData } = useFirestoreData('settings', userId); // Get settings data
+const LoansTab = ({ userId, isAdmin }) => {
+  const { data: members } = useFirestoreData('members', userId, isAdmin);
+  const { data: loans, addDocument, updateDocument, deleteDocument } = useFirestoreData('loans', userId, isAdmin);
+  const { data: settingsData } = useFirestoreData('settings', userId, isAdmin);
   const [selectedMember, setSelectedMember] = useState("");
   const [selectedFiscalYear, setSelectedFiscalYear] = useState("2081/2082");
   const [selectedQuarter, setSelectedQuarter] = useState("all");
@@ -1685,9 +1622,9 @@ const LoansTab = ({ userId }) => {
   // Get loan interest rate from settings or use default
   const loanInterestRate = useMemo(() => {
     if (settingsData && settingsData.length > 0) {
-      return parseFloat(settingsData[0].loanInterestRate) / 100; // Convert from percentage to decimal
+      return parseFloat(settingsData[0].loanInterestRate) / 100;
     }
-    return 0.07; // Default 7%
+    return 0.07;
   }, [settingsData]);
 
   const quarters = [
@@ -1777,6 +1714,11 @@ const LoansTab = ({ userId }) => {
   };
 
   const updateLoanTransaction = async (date, type, value) => {
+    if (!isAdmin) {
+      setError("Only administrators can modify loan transactions.");
+      return;
+    }
+    
     if (value && !validateFinancialInput(value)) {
       setError("Please enter a valid amount (positive number up to 100,000,000)");
       return;
@@ -1851,8 +1793,8 @@ const LoansTab = ({ userId }) => {
     return (
       <Card>
         <CardContent className="text-center">
-          <User />
-          <div>No members available. Please add members in the Members tab.</div>
+          <Users />
+          <div>No members available.</div>
         </CardContent>
       </Card>
     );
@@ -1869,6 +1811,7 @@ const LoansTab = ({ userId }) => {
           <div className="header-badge">
             <CreditCard />
             <span>Interest Rate: {(loanInterestRate * 100).toFixed(2)}%</span>
+            {isAdmin && <span className="admin-badge">Admin</span>}
           </div>
         </div>
       </div>
@@ -2003,6 +1946,7 @@ const LoansTab = ({ userId }) => {
                               min="0"
                               max="100000000"
                               step="0.01"
+                              disabled={!isAdmin}
                             />
                           </td>
                           
@@ -2016,6 +1960,7 @@ const LoansTab = ({ userId }) => {
                               min="0"
                               max="100000000"
                               step="0.01"
+                              disabled={!isAdmin}
                             />
                           </td>
                           
@@ -2031,6 +1976,7 @@ const LoansTab = ({ userId }) => {
                               min="0"
                               max="100000000"
                               step="0.01"
+                              disabled={!isAdmin}
                             />
                           </td>
                           
@@ -2092,8 +2038,8 @@ const LoansTab = ({ userId }) => {
 };
 
 // GroupTransactionsTab Component
-const GroupTransactionsTab = ({ userId }) => {
-  const { data: transactions, addDocument, deleteDocument } = useFirestoreData('groupTransactions', userId);
+const GroupTransactionsTab = ({ userId, isAdmin }) => {
+  const { data: transactions, addDocument, deleteDocument } = useFirestoreData('groupTransactions', userId, isAdmin);
   const [selectedFiscalYear, setSelectedFiscalYear] = useState("2081/2082");
   const [dateBs, setDateBs] = useState("");
   const [cashIn, setCashIn] = useState("");
@@ -2105,6 +2051,11 @@ const GroupTransactionsTab = ({ userId }) => {
   const [fiscalYears] = useState(["2081/2082", "2082/2083", "2083/2084", "2084/2085", "2085/2086", "2086/2087", "2087/2088", "2088/2089", "2089/2090", "2090/2091", "2091/2092"]);
 
   const addTransaction = async () => {
+    if (!isAdmin) {
+      setError("Only administrators can add group transactions.");
+      return;
+    }
+    
     if (!dateBs || !isValidBSDate(dateBs)) {
       setError("Please enter a valid date in YYYY-MM-DD format.");
       return;
@@ -2149,6 +2100,11 @@ const GroupTransactionsTab = ({ userId }) => {
   };
 
   const deleteTransaction = async (id) => {
+    if (!isAdmin) {
+      setError("Only administrators can delete group transactions.");
+      return;
+    }
+    
     if (!window.confirm("Are you sure you want to delete this transaction?")) return;
     
     setLoading(true);
@@ -2198,6 +2154,7 @@ const GroupTransactionsTab = ({ userId }) => {
           <div className="header-badge">
             <FileText />
             <span>{filteredTransactions.length} Transactions</span>
+            {isAdmin && <span className="admin-badge">Admin</span>}
           </div>
         </div>
       </div>
@@ -2205,80 +2162,82 @@ const GroupTransactionsTab = ({ userId }) => {
       <ErrorMessage error={error} />
       <SuccessMessage success={success} />
 
-      <Card>
-        <CardContent>
-          <h2>Add Group Transaction</h2>
-          
-          <div className="form-grid">
-            <div className="form-group">
-              <label>Select Fiscal Year</label>
-              <Select value={selectedFiscalYear} onValueChange={setSelectedFiscalYear}>
-                {fiscalYears.map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </Select>
+      {isAdmin && (
+        <Card>
+          <CardContent>
+            <h2>Add Group Transaction</h2>
+            
+            <div className="form-grid">
+              <div className="form-group">
+                <label>Select Fiscal Year</label>
+                <Select value={selectedFiscalYear} onValueChange={setSelectedFiscalYear}>
+                  {fiscalYears.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </Select>
+              </div>
             </div>
-          </div>
 
-          <div className="form-grid">
-            <div className="form-group">
-              <label>Date (BS)</label>
-              <Input
-                value={dateBs}
-                onChange={e => setDateBs(e.target.value)}
-                placeholder="YYYY-MM-DD"
-              />
+            <div className="form-grid">
+              <div className="form-group">
+                <label>Date (BS)</label>
+                <Input
+                  value={dateBs}
+                  onChange={e => setDateBs(e.target.value)}
+                  placeholder="YYYY-MM-DD"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>Cash In</label>
+                <Input
+                  type="number"
+                  value={cashIn}
+                  onChange={e => { setCashIn(e.target.value); setCashOut(""); }}
+                  placeholder="0.00"
+                  min="0"
+                  max="100000000"
+                  step="0.01"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>Cash Out</label>
+                <Input
+                  type="number"
+                  value={cashOut}
+                  onChange={e => { setCashOut(e.target.value); setCashIn(""); }}
+                  placeholder="0.00"
+                  min="0"
+                  max="100000000"
+                  step="0.01"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>Note</label>
+                <Input
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                  placeholder="Transaction note"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>&nbsp;</label>
+                <Button 
+                  onClick={addTransaction} 
+                  disabled={loading}
+                  className="form-btn"
+                >
+                  {loading ? <Loader2 /> : <Plus />}
+                  Add Transaction
+                </Button>
+              </div>
             </div>
-            
-            <div className="form-group">
-              <label>Cash In</label>
-              <Input
-                type="number"
-                value={cashIn}
-                onChange={e => { setCashIn(e.target.value); setCashOut(""); }}
-                placeholder="0.00"
-                min="0"
-                max="100000000"
-                step="0.01"
-              />
-            </div>
-            
-            <div className="form-group">
-              <label>Cash Out</label>
-              <Input
-                type="number"
-                value={cashOut}
-                onChange={e => { setCashOut(e.target.value); setCashIn(""); }}
-                placeholder="0.00"
-                min="0"
-                max="100000000"
-                step="0.01"
-              />
-            </div>
-            
-            <div className="form-group">
-              <label>Note</label>
-              <Input
-                value={note}
-                onChange={e => setNote(e.target.value)}
-                placeholder="Transaction note"
-              />
-            </div>
-            
-            <div className="form-group">
-              <label>&nbsp;</label>
-              <Button 
-                onClick={addTransaction} 
-                disabled={loading}
-                className="form-btn"
-              >
-                {loading ? <Loader2 /> : <Plus />}
-                Add Transaction
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {filteredTransactions.length > 0 && (
         <Card>
@@ -2320,7 +2279,7 @@ const GroupTransactionsTab = ({ userId }) => {
                     <th className="text-right">Cash Out</th>
                     <th>Note</th>
                     <th className="text-right">Balance</th>
-                    <th>Actions</th>
+                    {isAdmin && <th>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -2340,16 +2299,18 @@ const GroupTransactionsTab = ({ userId }) => {
                       
                       <td className="text-right balance-cell">{currency(t.balance)}</td>
                       
-                      <td className="action-cell">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => deleteTransaction(t.id)}
-                          disabled={loading}
-                        >
-                          <Trash2 />
-                        </Button>
-                      </td>
+                      {isAdmin && (
+                        <td className="action-cell">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => deleteTransaction(t.id)}
+                            disabled={loading}
+                          >
+                            <Trash2 />
+                          </Button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -2379,9 +2340,29 @@ const GroupTransactionsTab = ({ userId }) => {
   );
 };
 
-// SettingsTab Component
-const SettingsTab = ({ userId }) => {
-  const { data: settings, addDocument, updateDocument } = useFirestoreData('settings', userId);
+// ProfileTab Component - ALTERNATIVE FIX
+const ProfileTab = ({ userId, user, userRole, onUserUpdate }) => {
+  const { data: users, loading, error: firestoreError, updateDocument } = useFirestoreData('users', userId, userRole === 'admin');
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [error, setError] = useState(null); // Now we can use error and setError
+  const [success, setSuccess] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
+
+  // ... rest of the component remains the same using error and setError
+
+  return (
+    <div className="tab-content">
+      {/* ... */}
+      <ErrorMessage error={error || firestoreError} /> {/* Show both local and Firestore errors */}
+      {/* ... */}
+    </div>
+  );
+};
+
+// SettingsTab Component - UPDATED WITH ADMIN MANAGEMENT SECTION
+const SettingsTab = ({ userId, isAdmin }) => {
+  const { data: settings, addDocument, updateDocument } = useFirestoreData('settings', userId, isAdmin);
   const [formData, setFormData] = useState({
     savingsInterestRate: 5.00,
     loanInterestRate: 7.50,
@@ -2415,6 +2396,11 @@ const SettingsTab = ({ userId }) => {
   };
 
   const saveSettings = async () => {
+    if (!isAdmin) {
+      setError("Only administrators can modify settings.");
+      return;
+    }
+    
     setLoading(true);
     try {
       // Validate inputs
@@ -2446,6 +2432,11 @@ const SettingsTab = ({ userId }) => {
   };
 
   const addFiscalYear = () => {
+    if (!isAdmin) {
+      setError("Only administrators can add fiscal years.");
+      return;
+    }
+    
     if (!newFiscalYear || !/^\d{4}\/\d{4}$/.test(newFiscalYear)) {
       setError("Please enter a valid fiscal year in YYYY/YYYY format.");
       return;
@@ -2462,6 +2453,11 @@ const SettingsTab = ({ userId }) => {
   };
 
   const deleteFiscalYear = (fy) => {
+    if (!isAdmin) {
+      setError("Only administrators can delete fiscal years.");
+      return;
+    }
+    
     if (!window.confirm(`Are you sure you want to delete fiscal year ${fy}?`)) return;
 
     const updatedFiscalYears = fiscalYears.filter(y => y !== fy);
@@ -2476,7 +2472,7 @@ const SettingsTab = ({ userId }) => {
       const allData = {};
 
       for (const collectionName of collections) {
-        const q = query(collection(db, collectionName), where("userId", "==", userId));
+        const q = query(collection(db, collectionName));
         const querySnapshot = await getDocs(q);
         allData[collectionName] = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       }
@@ -2501,6 +2497,11 @@ const SettingsTab = ({ userId }) => {
   };
 
   const importData = (e) => {
+    if (!isAdmin) {
+      setError("Only administrators can import data.");
+      return;
+    }
+    
     const file = e.target.files[0];
     if (!file) return;
 
@@ -2518,7 +2519,7 @@ const SettingsTab = ({ userId }) => {
         for (const collectionName of ['members', 'transactions', 'loans', 'groupTransactions', 'settings']) {
           if (data[collectionName]) {
             // Delete existing data
-            const q = query(collection(db, collectionName), where("userId", "==", userId));
+            const q = query(collection(db, collectionName));
             const querySnapshot = await getDocs(q);
             querySnapshot.forEach(async (doc) => {
               await deleteDoc(doc.ref);
@@ -2527,8 +2528,7 @@ const SettingsTab = ({ userId }) => {
             // Add imported data
             for (const item of data[collectionName]) {
               await addDoc(collection(db, collectionName), {
-                ...item,
-                userId
+                ...item
               });
             }
           }
@@ -2553,6 +2553,11 @@ const SettingsTab = ({ userId }) => {
   };
 
   const resetData = async () => {
+    if (!isAdmin) {
+      setError("Only administrators can reset data.");
+      return;
+    }
+    
     if (!window.confirm("Are you sure you want to reset all data? This action cannot be undone.")) return;
 
     try {
@@ -2560,7 +2565,7 @@ const SettingsTab = ({ userId }) => {
       const collections = ['members', 'transactions', 'loans', 'groupTransactions', 'settings'];
 
       for (const collectionName of collections) {
-        const q = query(collection(db, collectionName), where("userId", "==", userId));
+        const q = query(collection(db, collectionName));
         const querySnapshot = await getDocs(q);
         querySnapshot.forEach(async (doc) => {
           await deleteDoc(doc.ref);
@@ -2580,10 +2585,164 @@ const SettingsTab = ({ userId }) => {
     }
   };
 
+  // ADD THE ADMIN MANAGEMENT COMPONENT HERE
+  const AdminManagement = () => {
+    const { data: admins, loading: adminsLoading, error: adminsError, addDocument: addAdminDoc, deleteDocument: deleteAdminDoc } = useFirestoreData('admins', userId, isAdmin);
+    const { data: users } = useFirestoreData('users', userId, isAdmin);
+    const [adminEmail, setAdminEmail] = useState("");
+    const [adminError, setAdminError] = useState(null);
+    const [adminSuccess, setAdminSuccess] = useState(null);
+
+    const addAdmin = async () => {
+      if (!adminEmail) {
+        setAdminError("Please enter an email address.");
+        return;
+      }
+
+      // Find user by email
+      const userToAdd = users.find(u => u.email === adminEmail);
+      if (!userToAdd) {
+        setAdminError("User with this email does not exist.");
+        return;
+      }
+
+      // Check if already an admin
+      const isAlreadyAdmin = admins.some(a => a.userId === userToAdd.uid);
+      if (isAlreadyAdmin) {
+        setAdminError("This user is already an administrator.");
+        return;
+      }
+
+      try {
+        await addAdminDoc({
+          userId: userToAdd.uid,
+          email: userToAdd.email,
+          fullName: userToAdd.fullName,
+          addedBy: userId,
+          addedAt: serverTimestamp()
+        });
+        
+        setAdminEmail("");
+        setAdminError(null);
+        setAdminSuccess("Administrator added successfully!");
+        setTimeout(() => setAdminSuccess(null), 3000);
+      } catch (err) {
+        setAdminError(err.message);
+      }
+    };
+
+    const removeAdmin = async (adminId, adminEmail) => {
+      if (!window.confirm(`Are you sure you want to remove administrator privileges from ${adminEmail}?`)) return;
+      
+      try {
+        await deleteAdminDoc(adminId);
+        setAdminError(null);
+        setAdminSuccess("Administrator removed successfully!");
+        setTimeout(() => setAdminSuccess(null), 3000);
+      } catch (err) {
+        setAdminError(err.message);
+      }
+    };
+
+    if (adminsLoading) return <LoadingSpinner text="Loading administrators..." />;
+
+    return (
+      <div className="admin-management">
+        <ErrorMessage error={adminsError || adminError} />
+        <SuccessMessage success={adminSuccess} />
+
+        <Card className="form-card">
+          <CardContent>
+            <h3>Add New Administrator</h3>
+            <div className="form-grid">
+              <div className="form-group">
+                <label>User Email</label>
+                <Input 
+                  type="email"
+                  value={adminEmail} 
+                  onChange={e => setAdminEmail(e.target.value)} 
+                  placeholder="Enter user's email address"
+                  icon={<Mail />}
+                />
+              </div>
+              <Button onClick={addAdmin} className="form-btn">
+                <Plus /> Add Administrator
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="data-card">
+          <CardContent>
+            <div className="data-header">
+              <h3>Current Administrators</h3>
+              <div className="header-badge">
+                <span>{admins.length} Administrators</span>
+              </div>
+            </div>
+            
+            <div className="table-container">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Added On</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {admins.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="no-data">
+                        <Users />
+                        <div>No administrators found.</div>
+                      </td>
+                    </tr>
+                  ) : (
+                    admins.map(admin => (
+                      <tr key={admin.id}>
+                        <td>
+                          <div className="data-value">{admin.fullName || "Unknown"}</div>
+                        </td>
+                        <td>
+                          <div className="data-value">{admin.email}</div>
+                        </td>
+                        <td>
+                          <div className="data-value">
+                            {admin.addedAt ? new Date(admin.addedAt.seconds * 1000).toLocaleDateString() : "Unknown"}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="action-buttons">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => removeAdmin(admin.id, admin.email)}
+                              disabled={admin.userId === userId} // Can't remove yourself
+                            >
+                              <Trash2 />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  // UPDATE SECTIONS TO INCLUDE ADMIN MANAGEMENT
   const sections = [
     { id: "general", label: "General Settings", icon: <SettingsIcon /> },
     { id: "fiscal", label: "Fiscal Years", icon: <Calendar /> },
     { id: "data", label: "Data Management", icon: <DatabaseIcon /> },
+    { id: "admins", label: "Admin Management", icon: <ShieldIcon /> },
     { id: "security", label: "Security", icon: <ShieldIcon /> },
     { id: "about", label: "About", icon: <InfoIcon /> },
   ];
@@ -2605,6 +2764,7 @@ const SettingsTab = ({ userId }) => {
                   step="0.01"
                   min="0"
                   max="100"
+                  disabled={!isAdmin}
                 />
               </div>
 
@@ -2618,6 +2778,7 @@ const SettingsTab = ({ userId }) => {
                   step="0.01"
                   min="0"
                   max="100"
+                  disabled={!isAdmin}
                 />
               </div>
 
@@ -2627,6 +2788,7 @@ const SettingsTab = ({ userId }) => {
                   name="fiscalYearStart"
                   value={formData.fiscalYearStart}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, fiscalYearStart: value }))}
+                  disabled={!isAdmin}
                 >
                   {fiscalYears.map(year => (
                     <option key={year} value={year}>{year}</option>
@@ -2642,6 +2804,7 @@ const SettingsTab = ({ userId }) => {
                   value={formData.currencySymbol}
                   onChange={handleInputChange}
                   maxLength="5"
+                  disabled={!isAdmin}
                 />
               </div>
 
@@ -2651,6 +2814,7 @@ const SettingsTab = ({ userId }) => {
                   name="dateFormat"
                   value={formData.dateFormat}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, dateFormat: value }))}
+                  disabled={!isAdmin}
                 >
                   {dateFormats.map(format => (
                     <option key={format} value={format}>{format}</option>
@@ -2664,6 +2828,7 @@ const SettingsTab = ({ userId }) => {
                   name="backupFrequency"
                   value={formData.backupFrequency}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, backupFrequency: value }))}
+                  disabled={!isAdmin}
                 >
                   {backupFrequencies.map(freq => (
                     <option key={freq} value={freq}>{freq.charAt(0).toUpperCase() + freq.slice(1)}</option>
@@ -2672,10 +2837,12 @@ const SettingsTab = ({ userId }) => {
               </div>
             </div>
 
-            <Button onClick={saveSettings} disabled={loading} className="save-btn">
-              {loading ? <Loader2 /> : <SaveIcon />}
-              Save Settings
-            </Button>
+            {isAdmin && (
+              <Button onClick={saveSettings} disabled={loading} className="save-btn">
+                {loading ? <Loader2 /> : <SaveIcon />}
+                Save Settings
+              </Button>
+            )}
           </div>
         );
 
@@ -2683,30 +2850,34 @@ const SettingsTab = ({ userId }) => {
         return (
           <div className="settings-section">
             <h3>Fiscal Years Management</h3>
-            <div className="form-grid">
-              <div className="form-group">
-                <label>New Fiscal Year (YYYY/YYYY)</label>
-                <Input
-                  value={newFiscalYear}
-                  onChange={e => setNewFiscalYear(e.target.value)}
-                  placeholder="e.g., 2086/2087"
-                />
+            {isAdmin && (
+              <div className="form-grid">
+                <div className="form-group">
+                  <label>New Fiscal Year (YYYY/YYYY)</label>
+                  <Input
+                    value={newFiscalYear}
+                    onChange={e => setNewFiscalYear(e.target.value)}
+                    placeholder="e.g., 2086/2087"
+                  />
+                </div>
+                <Button onClick={addFiscalYear} className="form-btn">
+                  <Plus /> Add Fiscal Year
+                </Button>
               </div>
-              <Button onClick={addFiscalYear} className="form-btn">
-                <Plus /> Add Fiscal Year
-              </Button>
-            </div>
+            )}
             <div className="detail-list">
               {fiscalYears.map(fy => (
                 <div key={fy} className="list-item">
                   <span className="item-name">{fy}</span>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => deleteFiscalYear(fy)}
-                  >
-                    <Trash2 />
-                  </Button>
+                  {isAdmin && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => deleteFiscalYear(fy)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>
@@ -2728,35 +2899,57 @@ const SettingsTab = ({ userId }) => {
                 </CardContent>
               </Card>
 
-              <Card className="data-card">
-                <CardContent>
-                  <h4>Import Data</h4>
-                  <p>Restore from a previously exported backup file.</p>
-                  <div className="file-input-wrapper">
-                    <Button as="label" variant="outline" htmlFor="import-file">
-                      <UploadIcon /> Choose File
-                    </Button>
-                    <input
-                      type="file"
-                      id="import-file"
-                      accept=".json"
-                      onChange={importData}
-                      style={{ display: 'none' }}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
+              {isAdmin && (
+                <>
+                  <Card className="data-card">
+                    <CardContent>
+                      <h4>Import Data</h4>
+                      <p>Restore from a previously exported backup file.</p>
+                      <div className="file-input-wrapper">
+                        <Button as="label" variant="outline" htmlFor="import-file">
+                          <UploadIcon /> Choose File
+                        </Button>
+                        <input
+                          type="file"
+                          id="import-file"
+                          accept=".json"
+                          onChange={importData}
+                          style={{ display: 'none' }}
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
 
-              <Card className="data-card warning">
-                <CardContent>
-                  <h4>Reset Data</h4>
-                  <p>Clear all data and restore to factory settings. This action cannot be undone.</p>
-                  <Button onClick={resetData} variant="destructive">
-                    <TrashIcon /> Reset All Data
-                  </Button>
+                  <Card className="data-card warning">
+                    <CardContent>
+                      <h4>Reset Data</h4>
+                      <p>Clear all data and restore to factory settings. This action cannot be undone.</p>
+                      <Button onClick={resetData} variant="destructive">
+                        <TrashIcon /> Reset All Data
+                      </Button>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+            </div>
+          </div>
+        );
+
+      // ADD THE ADMIN MANAGEMENT SECTION HERE
+      case "admins":
+        return (
+          <div className="settings-section">
+            <h3>Administrator Management</h3>
+            {isAdmin ? (
+              <AdminManagement />
+            ) : (
+              <Card>
+                <CardContent className="text-center">
+                  <ShieldIcon />
+                  <div>Only administrators can access this section.</div>
                 </CardContent>
               </Card>
-            </div>
+            )}
           </div>
         );
 
@@ -2767,7 +2960,7 @@ const SettingsTab = ({ userId }) => {
             <div className="settings-grid">
               <div className="setting-group">
                 <label>Auto Logout After Inactivity</label>
-                <select className="select" defaultValue="30">
+                <select className="select" defaultValue="30" disabled={!isAdmin}>
                   <option value="15">15 minutes</option>
                   <option value="30">30 minutes</option>
                   <option value="60">1 hour</option>
@@ -2778,7 +2971,7 @@ const SettingsTab = ({ userId }) => {
 
               <div className="setting-group">
                 <label>Password Requirements</label>
-                <select className="select" defaultValue="medium">
+                <select className="select" defaultValue="medium" disabled={!isAdmin}>
                   <option value="low">Low (6+ characters)</option>
                   <option value="medium">Medium (8+ characters, letters and numbers)</option>
                   <option value="high">High (10+ characters, mixed case, numbers, symbols)</option>
@@ -2787,52 +2980,55 @@ const SettingsTab = ({ userId }) => {
 
               <div className="setting-group">
                 <label>Two-Factor Authentication</label>
-                <select className="select" defaultValue="disabled">
+                <select className="select" defaultValue="disabled" disabled={!isAdmin}>
                   <option value="disabled">Disabled</option>
                   <option value="enabled">Enabled (Recommended)</option>
                 </select>
               </div>
             </div>
 
-            <Button onClick={saveSettings} disabled={loading}>
-              {loading ? <Loader2 /> : <SaveIcon />}
-              Save Security Settings
-            </Button>
+            {isAdmin && (
+              <Button onClick={saveSettings} disabled={loading}>
+                {loading ? <Loader2 /> : <SaveIcon />}
+                Save Security Settings
+              </Button>
+            )}
           </div>
         );
 
       case "about":
-  return (
-    <div className="settings-section">
-      <h3>About The Besties Saving</h3>
-      <Card>
-        <CardContent>
-          <div className="about-content">
-            <div className="app-info">
-              <h4>Application Information</h4>
-              <p><strong>Version:</strong> 1.0.0</p>
-              <p><strong>Last Updated:</strong> August 26, 2025</p>
-              <p><strong>License:</strong> Besties License</p>
-            </div>
+        return (
+          <div className="settings-section">
+            <h3>About The Besties Saving</h3>
+            <Card>
+              <CardContent>
+                <div className="about-content">
+                  <div className="app-info">
+                    <h4>Application Information</h4>
+                    <p><strong>Version:</strong> 1.0.0</p>
+                    <p><strong>Last Updated:</strong> August 26, 2025</p>
+                    <p><strong>License:</strong> Besties License</p>
+                  </div>
 
-            <div className="system-info">
-              <h4>System Information</h4>
-              <p><strong>Browser:</strong> {navigator.userAgent.split(') ')[0].split(' (')[1]}</p>
-              <p><strong>Screen Resolution:</strong> {window.screen.width}x{window.screen.height}</p>
-              <p><strong>User ID:</strong> {userId}</p>
-            </div>
+                  <div className="system-info">
+                    <h4>System Information</h4>
+                    <p><strong>Browser:</strong> {navigator.userAgent.split(') ')[0].split(' (')[1]}</p>
+                    <p><strong>Screen Resolution:</strong> {window.screen.width}x{window.screen.height}</p>
+                    <p><strong>User ID:</strong> {userId}</p>
+                    <p><strong>User Role:</strong> {isAdmin ? "Administrator" : "User"}</p>
+                  </div>
 
-            <div className="support-info">
-              <h4>Support</h4>
-              <p>For support inquiries, please contact:</p>
-              <p><strong>Email:</strong> bestiessaving1@gmail.com</p>
-              <p><strong>Phone:</strong> 9860022437, 9843132797, 9843767788, 9843662707</p>
-            </div>
+                  <div className="support-info">
+                    <h4>Support</h4>
+                    <p>For support inquiries, please contact:</p>
+                    <p><strong>Email:</strong> bestiessaving1@gmail.com</p>
+                    <p><strong>Phone:</strong> 9860022437, 9843132797, 9843767788, 9843662707</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
+        );
 
       default:
         return <div>Select a settings category</div>;
@@ -2846,6 +3042,7 @@ const SettingsTab = ({ userId }) => {
         <div className="header-badge">
           <SettingsIcon />
           <span>Configuration</span>
+          {isAdmin && <span className="admin-badge">Admin</span>}
         </div>
       </div>
 
@@ -2875,45 +3072,37 @@ const SettingsTab = ({ userId }) => {
   );
 };
 
-// Main App Component
-const App = ({ user, onLogout, userRole }) => {
+// Main App Component - FIXED PROFILE TAB PASSING
+const App = ({ user, onLogout, userRole, onUserUpdate }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [userName, setUserName] = useState(user.displayName || "");
   const isAdmin = userRole === 'admin';
 
-  const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: <BarChart3 /> },
-    { id: 'members', label: 'Members', icon: <User /> },
-    { id: 'transactions', label: 'Transactions', icon: <Calculator /> },
-    { id: 'loans', label: 'Loans', icon: <CreditCard /> },
-    { id: 'groupTransactions', label: 'Group Transactions', icon: <FileText /> },
-    { id: 'settings', label: 'Settings', icon: <SettingsIcon /> },
-  ];
+  useEffect(() => {
+    if (window.location.pathname !== '/dashboard') {
+      window.history.replaceState(null, '', '/dashboard');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user.displayName) setUserName(user.displayName);
+  }, [user.displayName]);
+
+  const handleUserUpdate = (updatedUser) => {
+    setUserName(updatedUser.displayName || "");
+    if (onUserUpdate) onUserUpdate(updatedUser);
+  };
 
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'dashboard':
-        return <Dashboard userId={user.uid} isAdmin={isAdmin} />;
-      case 'members':
-        return <MembersTab userId={user.uid} isAdmin={isAdmin} />;
-      case 'transactions':
-        return <TransactionsTab userId={user.uid} isAdmin={isAdmin} />;
-      case 'loans':
-        return <LoansTab userId={user.uid} isAdmin={isAdmin} />;
-      case 'groupTransactions':
-        return <GroupTransactionsTab userId={user.uid} isAdmin={isAdmin} />;
-      case 'settings':
-        return <SettingsTab userId={user.uid} isAdmin={isAdmin} />;
-      default:
-        return <Dashboard userId={user.uid} isAdmin={isAdmin} />;
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      onLogout();
-    } catch (error) {
-      console.error("Logout error:", error);
+      case 'dashboard': return <Dashboard userId={user.uid} isAdmin={isAdmin} userName={userName} />;
+      case 'members': return <MembersTab userId={user.uid} isAdmin={isAdmin} />;
+      case 'transactions': return <TransactionsTab userId={user.uid} isAdmin={isAdmin} />;
+      case 'loans': return <LoansTab userId={user.uid} isAdmin={isAdmin} />;
+      case 'groupTransactions': return <GroupTransactionsTab userId={user.uid} isAdmin={isAdmin} />;
+      case 'profile': return <ProfileTab userId={user.uid} user={user} userRole={userRole} onUserUpdate={handleUserUpdate} />;
+      case 'settings': return <SettingsTab userId={user.uid} isAdmin={isAdmin} />;
+      default: return <Dashboard userId={user.uid} isAdmin={isAdmin} userName={userName} />;
     }
   };
 
@@ -2927,70 +3116,78 @@ const App = ({ user, onLogout, userRole }) => {
           </h1>
           <div className="user-info">
             <User />
-            {user.email}
-            {isAdmin && <span className="user-role">Admin</span>}
+            <div>
+              <div className="user-name">{userName || user.email}</div>
+              <div className="user-email">{user.email}</div>
+              {isAdmin && <span className="admin-badge">Admin</span>}
+            </div>
           </div>
         </div>
 
         <nav className="sidebar-nav">
-          {tabs.map(tab => (
-            <Button
-              key={tab.id}
-              variant={activeTab === tab.id ? 'secondary' : 'ghost'}
-              className="nav-btn"
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.icon}
-              {tab.label}
-            </Button>
-          ))}
+          <Button variant={activeTab === 'dashboard' ? 'secondary' : 'ghost'} onClick={() => setActiveTab('dashboard')}><BarChart3 /> Dashboard</Button>
+          <Button variant={activeTab === 'members' ? 'secondary' : 'ghost'} onClick={() => setActiveTab('members')}><Users /> Members</Button>
+          <Button variant={activeTab === 'transactions' ? 'secondary' : 'ghost'} onClick={() => setActiveTab('transactions')}><Calculator /> Transactions</Button>
+          <Button variant={activeTab === 'loans' ? 'secondary' : 'ghost'} onClick={() => setActiveTab('loans')}><CreditCard /> Loans</Button>
+          <Button variant={activeTab === 'groupTransactions' ? 'secondary' : 'ghost'} onClick={() => setActiveTab('groupTransactions')}><FileText /> Group Transactions</Button>
+          <Button variant={activeTab === 'profile' ? 'secondary' : 'ghost'} onClick={() => setActiveTab('profile')}><User /> Profile</Button>
+          <Button variant={activeTab === 'settings' ? 'secondary' : 'ghost'} onClick={() => setActiveTab('settings')}><SettingsIcon /> Settings</Button>
         </nav>
 
-        <Button variant="destructive" className="logout-btn" onClick={handleLogout}>
-          <LogOut />
-          Logout
-        </Button>
+        <Button variant="destructive" onClick={onLogout}><LogOut /> Logout</Button>
       </div>
 
-      <div className="main-content">
-        {renderTabContent()}
-      </div>
+      <div className="main-content">{renderTabContent()}</div>
     </div>
   );
 };
 
-// Root Component
+// Root Component - FIXED AUTH & PROFILE
 const Root = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
-  const [userRole, setUserRole] = useState('user');
+  const [userRole, setUserRole] = useState("user");
   const [loading, setLoading] = useState(true);
+
+  const checkIfUserIsAdmin = async (userId) => {
+    try {
+      const adminDoc = await getDocs(query(collection(db, "admins"), where("userId", "==", userId)));
+      return !adminDoc.empty;
+    } catch (error) {
+      console.error("Error checking admin status:", error);
+      return false;
+    }
+  };
+
+  const getUserDetails = async (userId) => {
+    try {
+      const userDoc = await getDocs(query(collection(db, "users"), where("uid", "==", userId)));
+      if (!userDoc.empty) return userDoc.docs[0].data();
+      return null;
+    } catch (error) {
+      console.error("Error fetching user details:", error);
+      return null;
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        // Check if user is admin
-        try {
-          const q = query(
-            collection(db, 'admins'),
-            where("uid", "==", user.uid)
-          );
-          const querySnapshot = await getDocs(q);
-          const isAdmin = !querySnapshot.empty;
-          
-          setIsAuthenticated(true);
-          setUser(user);
-          setUserRole(isAdmin ? 'admin' : 'user');
-        } catch (error) {
-          console.error("Error checking admin status:", error);
-          setIsAuthenticated(true);
-          setUser(user);
-          setUserRole('user');
-        }
+        const isAdmin = await checkIfUserIsAdmin(user.uid);
+        const userDetails = await getUserDetails(user.uid);
+
+        const userWithDetails = {
+          ...user,
+          displayName: userDetails?.fullName || user.displayName || ""
+        };
+
+        setIsAuthenticated(true);
+        setUser(userWithDetails);
+        setUserRole(isAdmin ? "admin" : "user");
       } else {
         setIsAuthenticated(false);
         setUser(null);
-        setUserRole('user');
+        setUserRole("user");
       }
       setLoading(false);
     });
@@ -2998,19 +3195,41 @@ const Root = () => {
     return () => unsubscribe();
   }, []);
 
+  const handleUserUpdate = (updatedUser) => setUser(updatedUser);
   const handleLogout = () => {
     setIsAuthenticated(false);
     setUser(null);
-    setUserRole('user');
+    setUserRole("user");
   };
 
-  if (loading) {
-    return <LoadingSpinner text="Checking authentication..." />;
-  }
+  if (loading) return <LoadingSpinner text="Checking authentication..." />;
 
-  return isAuthenticated ? 
-    <App user={user} onLogout={handleLogout} userRole={userRole} /> : 
-    <LoginPage setIsAuthenticated={setIsAuthenticated} setUser={setUser} setUserRole={setUserRole} />;
+  return (
+    <Router>
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            isAuthenticated
+              ? <Navigate to="/dashboard" replace />
+              : <LoginPage setIsAuthenticated={setIsAuthenticated} setUser={setUser} setUserRole={setUserRole} />
+          }
+        />
+        <Route
+          path="/dashboard/*"
+          element={
+            isAuthenticated
+              ? <App user={user} onLogout={handleLogout} userRole={userRole} onUserUpdate={handleUserUpdate} />
+              : <Navigate to="/login" replace />
+          }
+        />
+        <Route
+          path="/"
+          element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />}
+        />
+      </Routes>
+    </Router>
+  );
 };
 
 export default Root;
