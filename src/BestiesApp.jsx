@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import './bestiesapp.css';
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { auth, db } from './firebase';
 import { 
   createUserWithEmailAndPassword, 
