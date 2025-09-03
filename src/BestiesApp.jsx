@@ -193,36 +193,62 @@ const LoadingSpinner = ({ text = "Loading..." }) => (
   </div>
 );
 
-// Custom hook for Firebase data operations - UPDATED FOR SHARED DATA
+// Updated useFirestoreData hook with proper cleanup
 const useFirestoreData = (collectionName, userId, isAdmin = false) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    setLoading(true);
-    
-    // For shared data, we don't filter by userId
-    const q = isAdmin 
-      ? query(collection(db, collectionName)) // Admins see all data
-      : query(collection(db, collectionName)); // All users see the same data
-    
-    const unsubscribe = onSnapshot(q, 
-      (snapshot) => {
-        const newData = [];
-        snapshot.forEach((doc) => {
-          newData.push({ id: doc.id, ...doc.data() });
-        });
-        setData(newData);
-        setLoading(false);
-      },
-      (err) => {
+    let unsubscribe = () => {};
+    let isMounted = true;
+
+    const fetchData = async () => {
+      if (!isMounted) return;
+      
+      setLoading(true);
+      try {
+        // For shared data, we don't filter by userId
+        const q = isAdmin 
+          ? query(collection(db, collectionName)) // Admins see all data
+          : query(collection(db, collectionName)); // All users see the same data
+        
+        unsubscribe = onSnapshot(q, 
+          (snapshot) => {
+            if (!isMounted) return;
+            
+            const newData = [];
+            snapshot.forEach((doc) => {
+              newData.push({ id: doc.id, ...doc.data() });
+            });
+            setData(newData);
+            setLoading(false);
+            setError(null);
+          },
+          (err) => {
+            if (!isMounted) return;
+            
+            console.error("Firestore error:", err);
+            setError(err.message);
+            setLoading(false);
+          }
+        );
+      } catch (err) {
+        if (!isMounted) return;
+        
+        console.error("Error setting up listener:", err);
         setError(err.message);
         setLoading(false);
       }
-    );
+    };
 
-    return () => unsubscribe();
+    fetchData();
+
+    // Cleanup function
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, [collectionName, userId, isAdmin]);
 
   const addDocument = async (newData) => {
@@ -2340,22 +2366,189 @@ const GroupTransactionsTab = ({ userId, isAdmin }) => {
   );
 };
 
-// ProfileTab Component - ALTERNATIVE FIX
+// ProfileTab Component with better error handling
 const ProfileTab = ({ userId, user, userRole, onUserUpdate }) => {
-  const { data: users, loading, error: firestoreError, updateDocument } = useFirestoreData('users', userId, userRole === 'admin');
+  const { data: users, loading, error: firestoreError, updateDocument, refreshData } = useFirestoreData('users', userId, userRole === 'admin');
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
-  const [error, setError] = useState(null); // Now we can use error and setError
+  const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
 
-  // ... rest of the component remains the same using error and setError
+  // Find current user's data
+  const currentUserData = useMemo(() => {
+    return users.find(u => u.uid === userId) || {};
+  }, [users, userId]);
+
+  useEffect(() => {
+    if (currentUserData) {
+      setFullName(currentUserData.fullName || "");
+      setPhone(currentUserData.phone || "");
+    }
+  }, [currentUserData]);
+
+  const handleSave = async () => {
+    try {
+      // Find the user document ID
+      const userDoc = users.find(u => u.uid === userId);
+      if (!userDoc) {
+        throw new Error("User data not found");
+      }
+
+      await updateDocument(userDoc.id, {
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        updatedAt: serverTimestamp()
+      });
+
+      // Update the parent component with new user data
+      if (onUserUpdate) {
+        onUserUpdate({
+          ...user,
+          displayName: fullName.trim()
+        });
+      }
+
+      setIsEditing(false);
+      setError(null);
+      setSuccess("Profile updated successfully!");
+      setTimeout(() => setSuccess(null), 3000);
+      
+      // Refresh the data
+      refreshData();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleCancel = () => {
+    setFullName(currentUserData.fullName || "");
+    setPhone(currentUserData.phone || "");
+    setIsEditing(false);
+    setError(null);
+  };
+
+  if (loading) return <LoadingSpinner text="Loading profile..." />;
 
   return (
     <div className="tab-content">
-      {/* ... */}
-      <ErrorMessage error={error || firestoreError} /> {/* Show both local and Firestore errors */}
-      {/* ... */}
+      <div className="page-header">
+        <h1>My Profile</h1>
+        <div className="header-badge">
+          <User />
+          <span>Personal Information</span>
+          {userRole === 'admin' && <span className="admin-badge">Admin</span>}
+        </div>
+      </div>
+
+      <ErrorMessage error={error || firestoreError} />
+      <SuccessMessage success={success} />
+
+      <Card className="profile-card">
+        <CardContent>
+          <div className="profile-header">
+            <div className="profile-avatar">
+              <User />
+            </div>
+            <div className="profile-info">
+              <h2>{currentUserData.fullName || "User"}</h2>
+              <p>{user.email}</p>
+              <span className="role-badge">{userRole === 'admin' ? 'Administrator' : 'User'}</span>
+            </div>
+          </div>
+
+          <div className="profile-details">
+            <h3>Personal Information</h3>
+            
+            <div className="form-grid">
+              <div className="form-group">
+                <label>Full Name</label>
+                <Input
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Your full name"
+                  disabled={!isEditing}
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>Email Address</label>
+                <Input
+                  value={user.email}
+                  disabled={true}
+                  placeholder="Email address"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>Phone Number</label>
+                <Input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="Your phone number"
+                  disabled={!isEditing}
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>User ID</label>
+                <Input
+                  value={userId}
+                  disabled={true}
+                  placeholder="User ID"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>Role</label>
+                <Input
+                  value={userRole === 'admin' ? 'Administrator' : 'User'}
+                  disabled={true}
+                />
+              </div>
+              
+              <div className="form-group">
+                <label>Member Since</label>
+                <Input
+                  value={currentUserData.createdAt ? new Date(currentUserData.createdAt.seconds * 1000).toLocaleDateString() : "Unknown"}
+                  disabled={true}
+                />
+              </div>
+            </div>
+
+            <div className="profile-actions">
+              {isEditing ? (
+                <>
+                  <Button onClick={handleSave} className="save-btn">
+                    <SaveIcon /> Save Changes
+                  </Button>
+                  <Button variant="outline" onClick={handleCancel}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button onClick={() => setIsEditing(true)}>
+                  <Edit /> Edit Profile
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="security-card">
+        <CardContent>
+          <h3>Security</h3>
+          <div className="security-actions">
+            <Button variant="outline">
+              <Lock /> Change Password
+            </Button>
+            <Button variant="outline">
+              <ShieldIcon /> Two-Factor Authentication
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };
